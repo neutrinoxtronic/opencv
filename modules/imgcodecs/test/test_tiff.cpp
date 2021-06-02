@@ -396,11 +396,11 @@ TEST(Imgcodecs_Tiff, read_multipage_indexed)
     {
         SCOPED_TRACE("Edge Cases");
         vector<Mat> multi_pages;
-        bool res = imreadmulti(filename, multi_pages, 0, 0, IMREAD_LOAD_GDAL);
+        bool res = imreadmulti(filename, multi_pages, 0, 0);
         // If we asked for 0 images and we successfully read 0 images should this be false ?
         ASSERT_TRUE(res == false);
         ASSERT_EQ((size_t)0, multi_pages.size());
-        res = imreadmulti(filename, multi_pages, 0, 123123, IMREAD_LOAD_GDAL);
+        res = imreadmulti(filename, multi_pages, 0, 123123);
         ASSERT_TRUE(res == true);
         ASSERT_EQ((size_t)6, multi_pages.size());
     }
@@ -408,7 +408,7 @@ TEST(Imgcodecs_Tiff, read_multipage_indexed)
     {
         SCOPED_TRACE("Read all with indices");
         vector<Mat> multi_pages;
-        bool res = imreadmulti(filename, multi_pages, 0, 6, IMREAD_LOAD_GDAL);
+        bool res = imreadmulti(filename, multi_pages, 0, 6, IMREAD_COLOR + IMREAD_LOAD_GDAL);
         ASSERT_TRUE(res == true);
         ASSERT_EQ((size_t)page_count, multi_pages.size());
         for (int i = 0; i < page_count; i++)
@@ -422,7 +422,7 @@ TEST(Imgcodecs_Tiff, read_multipage_indexed)
         vector<Mat> multi_pages;
         for (int i = 0; i < page_count; i++)
         {
-            bool res = imreadmulti(filename, multi_pages, i, 1, IMREAD_LOAD_GDAL);
+            bool res = imreadmulti(filename, multi_pages, i, 1, IMREAD_COLOR + IMREAD_LOAD_GDAL);
             ASSERT_TRUE(res == true);
             ASSERT_EQ((size_t)1, multi_pages.size());
             EXPECT_PRED_FORMAT2(cvtest::MatComparator(0, 0), multi_pages[0], single_pages[i]);
