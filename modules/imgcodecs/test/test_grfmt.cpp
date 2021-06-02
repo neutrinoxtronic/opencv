@@ -60,7 +60,7 @@ TEST_P(Imgcodecs_FileMode, regression)
     ASSERT_TRUE(imreadmulti(filename, pages, mode));
     ASSERT_FALSE(pages.empty());
     const Mat page = pages[0];
-    ASSERT_FALSE(pages.size() > 1);
+    ASSERT_FALSE(pages.size() < 6);
 
     EXPECT_EQ(page.channels(), single.channels());
     EXPECT_EQ(page.depth(), single.depth());
