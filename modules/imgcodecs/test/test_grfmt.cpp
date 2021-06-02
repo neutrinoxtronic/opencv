@@ -62,8 +62,6 @@ TEST_P(Imgcodecs_FileMode, regression)
     const Mat page = pages[0];
     ASSERT_FALSE(pages.size() > 1);
 
-    ASSERT_FALSE(page1.empty());
-
     EXPECT_EQ(page.channels(), single.channels());
     EXPECT_EQ(page.depth(), single.depth());
     EXPECT_EQ(page.size().height, single.size().height);
