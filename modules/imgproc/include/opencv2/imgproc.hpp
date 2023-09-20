@@ -246,7 +246,7 @@ enum MorphShapes {
 //! @{
 
 //! interpolation algorithm
-enum InterpolationFlags{
+enum InterpolationFlags {
     /** nearest neighbor interpolation */
     INTER_NEAREST        = 0,
     /** bilinear interpolation */
@@ -278,6 +278,55 @@ enum InterpolationFlags{
     WARP_INVERSE_MAP     = 16
 };
 
+//! ONNX Resize Flags
+enum ResizeONNXFlags
+{
+    // static_assert((1 << INTER_COORDINATE_SHIFT) > INTER_MAX, "");
+    // https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
+
+    INTER_SAMPLER_SHIFT        = 0,
+    INTER_SAMPLER_BIT          = 4,
+    INTER_SAMPLER_MASK         = ((1 << INTER_SAMPLER_BIT) - 1) << INTER_SAMPLER_SHIFT,
+
+    INTER_COORDINATE_SHIFT     = 4,
+    INTER_COORDINATE_BIT       = 3,
+    INTER_COORDINATE_MASK      = ((1 << INTER_COORDINATE_BIT) - 1) << INTER_COORDINATE_SHIFT,
+    /** x_original = (x_resized + 0.5) / scale - 0.5 */
+    INTER_HALF_PIXEL           = 0 << INTER_COORDINATE_SHIFT,
+    /** adjustment = output_width_int / output_width
+        center = input_width / 2
+        offset = center * (1 - adjustment)
+        x_ori = offset + (x + 0.5) / scale - 0.5 */
+    INTER_HALF_PIXEL_SYMMETRIC = 1 << INTER_COORDINATE_SHIFT,
+    /** x_original = length_resized > 1 ? (x_resized + 0.5) / scale - 0.5 : 0 */
+    INTER_HALF_PIXEL_PYTORCH   = 2 << INTER_COORDINATE_SHIFT,
+    /** x_original = x_resized * (length_original - 1) / (length_resized - 1) */
+    INTER_ALIGN_CORNERS        = 3 << INTER_COORDINATE_SHIFT,
+    /** x_original = x_resized / scale */
+    INTER_ASYMMETRIC           = 4 << INTER_COORDINATE_SHIFT,
+    /** x_original = length_resized > 1
+     * ? start_x * (length_original - 1) + x_resized * (end_x - start_x) * (length_original - 1) / (length_resized - 1)
+     * : 0.5 * (start_x + end_x) * (length_original - 1) */
+    INTER_TF_CROP_RESIZE       = 5 << INTER_COORDINATE_SHIFT,
+
+    INTER_NEAREST_MODE_SHIFT   = INTER_COORDINATE_SHIFT + INTER_COORDINATE_BIT,
+    INTER_NEAREST_MODE_BIT     = 3,
+    INTER_NEAREST_MODE_MASK    = ((1 << INTER_NEAREST_MODE_BIT) - 1) << INTER_NEAREST_MODE_SHIFT,
+    /** round half down: x =  ceil(x - 0.5) */
+    INTER_NEAREST_PREFER_FLOOR = 0 << INTER_NEAREST_MODE_SHIFT,
+    /** round half up  : x = floor(x + 0.5) */
+    INTER_NEAREST_PREFER_CEIL  = 1 << INTER_NEAREST_MODE_SHIFT,
+    /** x = floor(x) */
+    INTER_NEAREST_FLOOR        = 2 << INTER_NEAREST_MODE_SHIFT,
+    /** x =  ceil(x) */
+    INTER_NEAREST_CEIL         = 3 << INTER_NEAREST_MODE_SHIFT,
+
+    INTER_ANTIALIAS_SHIFT      = INTER_NEAREST_MODE_SHIFT + INTER_NEAREST_MODE_BIT,
+    INTER_ANTIALIAS_BIT        = 1,
+    INTER_ANTIALIAS_MASK       = ((1 << INTER_ANTIALIAS_BIT) - 1) << INTER_ANTIALIAS_SHIFT,
+    INTER_ANTIALIAS            = 1 << INTER_ANTIALIAS_SHIFT,
+};
+
 /** \brief Specify the polar mapping mode
 @sa warpPolar
 */
@@ -288,11 +337,11 @@ enum WarpPolarMode
 };
 
 enum InterpolationMasks {
-       INTER_BITS      = 5,
-       INTER_BITS2     = INTER_BITS * 2,
-       INTER_TAB_SIZE  = 1 << INTER_BITS,
-       INTER_TAB_SIZE2 = INTER_TAB_SIZE * INTER_TAB_SIZE
-     };
+    INTER_BITS      = 5,
+    INTER_BITS2     = INTER_BITS * 2,
+    INTER_TAB_SIZE  = 1 << INTER_BITS,
+    INTER_TAB_SIZE2 = INTER_TAB_SIZE * INTER_TAB_SIZE
+};
 
 //! @} imgproc_transform
 
@@ -2388,6 +2437,21 @@ src.size(), fx, and fy; the type of dst is the same as of src.
 CV_EXPORTS_W void resize( InputArray src, OutputArray dst,
                           Size dsize, double fx = 0, double fy = 0,
                           int interpolation = INTER_LINEAR );
+
+/** @brief onnx resize op
+ * https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
+ * scale can not be default argument otherwise it will have same signature from resize
+ * to mimic resize:
+ * INTER_AREA    : LINEAR + ALIGN_CORNERS + ANTI_ALIAS + downsample + dsize
+ * INTER_NEAREST : NEAREST + ASYMMETRIC + PREFER_FLOOR
+ * INTER_LINEAR  : LINEAR + HALF_PIXEL
+ * INTER_CUBIC   : CUBIC + HALF_PIXEL + cubicCoef -0.75
+ * todo: support lanczos lobe 2/3/4 ?
+ */
+CV_EXPORTS_W void resizeONNX(
+    InputArray src, OutputArray dst, Size dsize, Point2d scale = Point2d(),
+    int interpolation = INTER_LINEAR | INTER_HALF_PIXEL | INTER_ANTIALIAS,
+    double cubicCoeff = -0.75, Rect2d roi = Rect2d());
 
 /** @brief Applies an affine transformation to an image.
 

@@ -946,6 +946,56 @@ static inline void interpolateLanczos4( float x, float* coeffs )
         coeffs[i] *= sum;
 }
 
+/**
+ * the coordiante transformation from dst to src is linear
+ * and can be written as: x_org = f(x) = a * x + b
+ * note: scale may be user input and not equal to (src / dst)
+ */
+static Vec2f interCoordinate(int coordinate, int dst, int src, double inv_scale, double start, double end)
+{
+    float a, b;
+    if (coordinate == INTER_HALF_PIXEL
+        || coordinate == INTER_HALF_PIXEL_SYMMETRIC
+        || coordinate == INTER_HALF_PIXEL_PYTORCH)
+    {
+        a = static_cast<float>(inv_scale);
+        b = static_cast<float>(0.5 * inv_scale - 0.5);
+        if (coordinate == INTER_HALF_PIXEL_SYMMETRIC)
+            b += static_cast<float>(0.5 * (src - dst * inv_scale));
+        if (coordinate == INTER_HALF_PIXEL_PYTORCH && dst <= 1)
+            a = b = 0.f;
+    }
+    else if (coordinate == INTER_ALIGN_CORNERS)
+    {
+        a = static_cast<float>((src - 1.0) / (dst - 1.0));
+        b = 0.f;
+    }
+    else if (coordinate == INTER_ASYMMETRIC)
+    {
+        a = static_cast<float>(inv_scale);
+        b = 0.f;
+    }
+    else if (coordinate == INTER_TF_CROP_RESIZE)
+    {
+        CV_CheckGE(start, 0.0, "roi's start out of image");
+        CV_CheckLE(end  , 1.0, "roi's end   out of image");
+        CV_CheckLT(start, end, "roi's start not less than its end");
+        if (dst <= 1)
+        {
+            a = 0.f;
+            b = static_cast<float>(0.5 * (start + end) * (src - 1.0));
+        }
+        else
+        {
+            a = static_cast<float>((end - start) * (src - 1.0) / (dst - 1.0));
+            b = static_cast<float>(start * (src - 1.0));
+        }
+    }
+    else
+        CV_Error(Error::StsBadArg, format("Unknown coordinate transformation mode %d", coordinate));
+    return Vec2f(a, b);
+}
+
 template<typename ST, typename DT> struct Cast
 {
     typedef ST type1;
@@ -1230,6 +1280,126 @@ static void resizeNN_bitexact( const Mat& src, Mat& dst, double /*fx*/, double /
     resizeNN_bitexactInvoker invoker(src, dst, x_ofse, ify, ify0);
     parallel_for_(range, invoker, dst.total()/(double)(1<<16));
 }
+
+class ResizeONNX_NNInvoker : public ParallelLoopBody
+{
+    Mat src;
+    Mat& dst;
+    Matx22f M;
+    int mode;
+    AutoBuffer<size_t> x_ofs;
+    ResizeONNX_NNInvoker(const ResizeONNX_NNInvoker&);
+    ResizeONNX_NNInvoker& operator=(const ResizeONNX_NNInvoker&);
+
+    int computeIndex(int x, float a, float b) const
+    {
+        float f = ::fmaf(a, static_cast<float>(x), b);
+        if (mode == INTER_NEAREST_PREFER_FLOOR || INTER_NEAREST_CEIL)
+            x = cvCeil(f);
+        else
+            x = cvFloor(f);
+        return x;
+    }
+
+public:
+    ResizeONNX_NNInvoker(const Mat& _src, Mat& _dst, const Matx22f& _M, int _mode)
+        : src(_src), dst(_dst), M(_M), mode(_mode)
+    {
+        float offset = 0.f;
+        if (mode == INTER_NEAREST_PREFER_FLOOR)
+            offset = -0.5f;
+        if (mode == INTER_NEAREST_CEIL)
+            offset = +0.5f;
+        M(0, 1) += offset;
+        M(1, 1) += offset;
+
+        x_ofs.allocate(dst.cols);
+        size_t pix_size = src.elemSize();
+        for (int x = 0; x < dst.cols; ++x)
+        {
+            int sx = computeIndex(x, M(0, 0), M(0, 1));
+            sx = min(max(sx, 0), src.cols - 1);
+            x_ofs[x] = sx * pix_size;
+        }
+    }
+
+    virtual void operator() (const Range& range) const CV_OVERRIDE
+    {
+        int width = dst.cols;
+        int pix_size = static_cast<int>(src.elemSize());
+        for (int y = range.start; y < range.end; ++y)
+        {
+            uchar* D = dst.ptr(y);
+            int sy = computeIndex(y, M(1, 0), M(1, 1));
+            sy = min(max(sy, 0), src.rows - 1);
+            uchar const* S = src.ptr(sy);
+            int x = 0;
+
+            switch( pix_size )
+            {
+            case 1:
+                for (; x <= width - 2; x += 2)
+                {
+                    uchar t0 = S[x_ofs[x    ]];
+                    uchar t1 = S[x_ofs[x + 1]];
+                    D[x    ] = t0;
+                    D[x + 1] = t1;
+                }
+                for (; x < width; ++x)
+                    D[x] = S[x_ofs[x]];
+                break;
+            case 2:
+                for (; x < width; ++x)
+                    reinterpret_cast<short*>(D)[x] = *(reinterpret_cast<short const*>(S + x_ofs[x]));
+                break;
+            case 3:
+                for (; x < width; ++x, D += 3)
+                {
+                    const uchar* _tS = S + x_ofs[x];
+                    D[0] = _tS[0]; D[1] = _tS[1]; D[2] = _tS[2];
+                }
+                break;
+            case 4:
+                for (; x < width; ++x)
+                    reinterpret_cast<int*>(D)[x] = *(reinterpret_cast<int const*>(S + x_ofs[x]));
+                break;
+            case 6:
+                for (; x < width; ++x, D += 6)
+                {
+                    short const* _tS = reinterpret_cast<short const*>(S + x_ofs[x]);
+                    short* _tD = reinterpret_cast<short*>(D);
+                    _tD[0] = _tS[0]; _tD[1] = _tS[1]; _tD[2] = _tS[2];
+                }
+                break;
+            case 8:
+                for (; x < width; ++x, D += 8)
+                    reinterpret_cast<int64 *>(D)[x] = *(reinterpret_cast<int64 const *>(S + x_ofs[x]));
+                break;
+            case 12:
+                for (; x < width; ++x, D += 12)
+                {
+                    int const* _tS = reinterpret_cast<int const*>(S + x_ofs[x]);
+                    int* _tD = reinterpret_cast<int*>(D);
+                    _tD[0] = _tS[0]; _tD[1] = _tS[1]; _tD[2] = _tS[2];
+                }
+                break;
+#if CV_SIMD128
+            case 16:
+                for (; x < width; ++x, D += 16)
+                    v_store(D, v_load(S + x_ofs[x]));
+                break;
+#endif
+            default:
+                for (; x < width; ++x, D += pix_size )
+                {
+                    uchar const* _tS = S + x_ofs[x];
+                    for (int k = 0; k < pix_size; ++k)
+                        D[k] = _tS[k];
+                }
+            }
+        }
+    }
+};
 
 struct VResizeNoVec
 {
@@ -3170,6 +3340,257 @@ static void resizeArea_( const Mat& src, Mat& dst,
 }
 
 
+class ResizeOnnxCtrl
+{
+   utils::BufferArea area;
+
+public:
+    struct TabCell
+    {
+        int si, di;
+        union { float f; double d; };
+    };
+
+    /* resize parameter */
+    bool is_double, is_fixpt;
+    float A;
+
+    /* for antialias */
+    TabCell* xtab;
+    TabCell* ytab;
+    int xtablen, ytablen;
+    /* for normal resize */
+    int* xofs;
+    int* yofs;
+    double* xcoeffs;
+    double* ycoeffs;
+    int xmin, xmax;
+
+private:
+    int cubic_coeffs_antialias(int dstidx, int cn, float ratio, float scale, int size, TabCell* elem)
+    {
+        CV_CheckLT(scale, 1.f, "should use simple resize when enlarge image");
+        int index = cvFloor(ratio);
+        ratio -= index;
+        int start = cvFloor(-2.f / scale) + 1;
+        int end = 2 - start;
+        int len = end - start;
+        float sum = 0;
+        for (int i = start; i < end; ++i)
+        {
+            float x = fabsf(i - ratio) * scale;
+            if (x <= 1)
+                x = ((A + 2) * x - (A + 3)) * x * x + 1;
+            else if (x <= 2)
+                x = A * (((x - 5) * x + 8) * x - 4);
+            else
+                x = 0;
+            elem[i - start].di = cn * dstidx;
+            elem[i - start].si = cn * min(max(index + i, 0), size - 1);
+            elem[i - start].f = x;
+            sum += x;
+        }
+        for (int i = 0; i < len; ++i)
+        {
+            if (is_double)
+                elem[i].d = elem[i].f / sum;
+            else
+                elem[i].f = elem[i].f / sum;
+        }
+        return len;
+    }
+
+    void cubic_coeffs(float x, float* coeffs)
+    {
+        coeffs[0] = A * ((((x + 1) - 5) * (x + 1) + 8) * (x + 1) - 4);
+        coeffs[1] = ((A + 2) * x - (A + 3)) * x * x + 1;
+        coeffs[2] = ((A + 2) * (1 - x) - (A + 3)) * (1 - x) * (1 - x) + 1;
+        coeffs[3] = 1.f - coeffs[0] - coeffs[1] - coeffs[2];
+    }
+
+    int linear_coeffs_antialias(int dstidx, int cn, float ratio, float scale, int size, TabCell* elem)
+    {
+        CV_CheckLT(scale, 1.f, "should use simple resize when enlarge image");
+        int index = cvFloor(ratio);
+        ratio -= index;
+        int start = cvFloor(-1.f / scale) + 1;
+        int end = 2 - 2 * start;
+        int len = end - start;
+        float sum = 0;
+        for (int i = start; i < end; ++i)
+        {
+            float x = fabsf(i - ratio) * scale;
+            x = min(max(1.f - x, 0.f), 1.f);
+            elem[i - start].di = cn * dstidx;
+            elem[i - start].si = cn * min(max(index + i, 0), size - 1);
+            elem[i - start].f = x;
+            sum += x;
+        }
+        for (int i = 0; i < len; ++i)
+        {
+            if (is_double)
+                elem[i].d = elem[i].f / sum;
+            else
+                elem[i].f = elem[i].f / sum;
+        }
+        return len;
+    }
+
+    void linear_coeffs(float x, float* coeffs)
+    {
+        coeffs[0] = 1.f - x;
+        coeffs[1] = x;
+    }
+
+   public:
+    ResizeOnnxCtrl(int interpolation, int type, float cubicCoeff, Point2f scale,
+        Size ssize, Size dsize, Matx22f const& M)
+    {
+        int sampler = interpolation & INTER_SAMPLER_MASK;
+        int antialias = interpolation & INTER_ANTIALIAS;
+        CV_CheckGE(cubicCoeff, -1.0, "cubic coefficient should in range [-1, 0)");
+        CV_CheckLT(cubicCoeff, +0.0, "cubic coefficient should in range [-1, 0)");
+        CV_Check(sampler, sampler == INTER_LINEAR || sampler == INTER_CUBIC, "should not error");
+
+        int cn = CV_MAT_CN(type), depth = CV_MAT_DEPTH(type);
+        int ksize = (sampler == INTER_LINEAR ? 2 : 4);
+        int khalf = ksize / 2;
+        is_double = (depth == CV_64F);
+        is_fixpt = (depth == CV_8U || depth == CV_8S);
+        area.allocate(xtab, ksize * ssize.width * cn);
+        area.allocate(ytab, ksize * ssize.height * 1);
+        area.allocate(xofs, dsize.width * cn + 1);
+        area.allocate(yofs, dsize.height * 1 + 1);
+        area.allocate(xcoeffs, ksize * dsize.width * cn);
+        area.allocate(ycoeffs, ksize * dsize.height * 1);
+        area.commit();
+
+        /// x, resize column
+        xtablen = 0;
+        if (scale.x < 1 && antialias)
+        {
+            float a = M(0, 0), b = M(0, 1);
+            for (int d = 0; d < dsize.width; ++d)
+            {
+                float f = fmaf(static_cast<float>(d), a, b);
+                xofs[d] = xtablen;
+                int k = xtablen;
+                if (sampler == INTER_LINEAR)
+                    xtablen += linear_coeffs_antialias(d, cn, f, scale.x, ssize.width, xtab + xtablen);
+                else // if (sampler == INTER_CUBIC)
+                    xtablen += cubic_coeffs_antialias(d, cn, f, scale.x, ssize.width, xtab + xtablen);
+            }
+            xofs[dsize.width] = xtablen;
+        }
+        else
+        {
+            float cbuf[4];
+            float a = M(0, 0), b = M(0, 1);
+            xmin = 0;
+            xmax = dsize.width;
+            for (int d = 0; d < dsize.width; ++d)
+            {
+                float f = fmaf(static_cast<float>(d), a, b);
+                int s = cvFloor(f);
+                f -= s;
+                if (s < khalf - 1) {
+                    xmin = d + 1;
+                    if (s < 0 && sampler == INTER_LINEAR)
+                        f = 0, s = 0;
+                }
+                if (s + khalf >= ssize.width)
+                {
+                    xmax = min(xmax, d);
+                    if (s >= ssize.width - 1 && sampler == INTER_LINEAR)
+                        f = 0, s = ssize.width - 1;
+                }
+                for (int k = 0; k < cn; ++k)
+                    xofs[cn * d + k] = cn * s + k;
+                if (sampler == INTER_LINEAR)
+                    linear_coeffs(f, cbuf);
+                else // if (sampler == INTER_CUBIC)
+                    cubic_coeffs(f, cbuf);
+                if (is_fixpt)
+                {
+                    short* coeffs = reinterpret_cast<short*>(xcoeffs) + cn * ksize * d;
+                    for (int k = 0; k < ksize; ++k)
+                        coeffs[k] = saturate_cast<short>(cbuf[k] * INTER_RESIZE_COEF_SCALE);
+                    for (int k = ksize; k < cn * ksize; ++k)
+                        coeffs[k] = coeffs[k - ksize];
+                }
+                else if (is_double)
+                {
+                    double* coeffs = xcoeffs + cn * ksize * d;
+                    for (int k = 0; k < ksize; ++k)
+                        coeffs[k] = cbuf[k];
+                    for (int k = ksize; k < cn * ksize; ++k)
+                        coeffs[k] = coeffs[k - ksize];
+                }
+                else
+                {
+                    float* coeffs = reinterpret_cast<float*>(xcoeffs) + cn * ksize * d;
+                    for (int k = 0; k < ksize; ++k)
+                        coeffs[k] = cbuf[k];
+                    for (int k = ksize; k < cn * ksize; ++k)
+                        coeffs[k] = coeffs[k - ksize];
+                }
+            }
+        }
+
+        /// y, resize row
+        ytablen = 0;
+        if (scale.y < 1 && antialias)
+        {
+            float a = M(1, 0), b = M(1, 1);
+            for (int d = 0; d < dsize.height; ++d)
+            {
+                float f = fmaf(static_cast<float>(d), a, b);
+                yofs[d] = ytablen;
+                if (sampler == INTER_LINEAR)
+                    ytablen += linear_coeffs_antialias(d, cn, f, scale.y, ssize.height, ytab + ytablen);
+                else // if (sampler == INTER_CUBIC)
+                    ytablen += cubic_coeffs_antialias(d, cn, f, scale.y, ssize.height, ytab + ytablen);
+            }
+            yofs[dsize.height] = ytablen;
+        }
+        else
+        {
+            float cbuf[4];
+            float a = M(1, 0), b = M(1, 1);
+            for (int d = 0; d < dsize.height; ++d)
+            {
+                float f = fmaf(static_cast<float>(d), a, b);
+                int s = cvFloor(f);
+                f -= s;
+                yofs[d] = s;
+                if (sampler == INTER_LINEAR)
+                    linear_coeffs(f, cbuf);
+                else // if (sampler == INTER_CUBIC)
+                    cubic_coeffs(f, cbuf);
+                if (is_fixpt)
+                {
+                    short* coeffs = reinterpret_cast<short*>(ycoeffs) + cn * ksize * d;
+                    for (int k = 0; k < ksize; ++k)
+                        coeffs[k] = saturate_cast<short>(cbuf[k] * INTER_RESIZE_COEF_SCALE);
+                }
+                else if (is_double)
+                {
+                    double* coeffs = ycoeffs + cn * ksize * d;
+                    for (int k = 0; k < ksize; ++k)
+                        coeffs[k] = cbuf[k];
+                }
+                else
+                {
+                    float* coeffs = reinterpret_cast<float*>(ycoeffs) + cn * ksize * d;
+                    for (int k = 0; k < ksize; ++k)
+                        coeffs[k] = cbuf[k];
+                }
+            }
+        }
+    }
+};
+
+
 typedef void (*ResizeFunc)( const Mat& src, Mat& dst,
                             const int* xofs, const void* alpha,
                             const int* yofs, const void* beta,
@@ -3399,7 +3820,7 @@ static bool ocl_resize( InputArray _src, OutputArray _dst, Size dsize,
             if (k.empty())
                 return false;
 
-            k.args(ocl::KernelArg::ReadOnly(src), ocl::KernelArg::WriteOnly(dst),
+           k.args(ocl::KernelArg::ReadOnly(src), ocl::KernelArg::WriteOnly(dst),
                    (float)inv_fx, (float)inv_fy);
         }
     }
@@ -3471,6 +3892,145 @@ static bool ocl_resize( InputArray _src, OutputArray _dst, Size dsize,
             k.args(srcarg, dstarg);
         else
             k.args(srcarg, dstarg, inv_fxf, inv_fyf, ocl::KernelArg::PtrReadOnly(tabofsOcl),
+                   ocl::KernelArg::PtrReadOnly(mapOcl), ocl::KernelArg::PtrReadOnly(alphaOcl));
+
+        return k.run(2, globalsize, NULL, false);
+    }
+
+    return k.run(2, globalsize, 0, false);
+}
+
+static bool ocl_resizeONNX(
+    InputArray _src, OutputArray _dst, Matx22f const& M, int interpolation)
+{
+    int type = _src.type(), depth = CV_MAT_DEPTH(type), cn = CV_MAT_CN(type);
+    int sampler = interpolation & INTER_SAMPLER_MASK;
+    int nearest = interpolation & INTER_NEAREST_MODE_MASK;
+    bool is_area_fast = false;
+
+    if (cn > 4) return false;
+
+    UMat src = _src.getUMat(), dst = _dst.getUMat();
+    ocl::Kernel k;
+    size_t globalsize[] = { (size_t)dst.cols, (size_t)dst.rows };
+    ocl::Image2D srcImage;
+
+    // See if this could be done with a sampler.  We stick with integer
+    // datatypes because the observed error is low.
+    bool useSampler = (interpolation == INTER_LINEAR && ocl::Device::getDefault().imageSupport() &&
+                       ocl::Image2D::canCreateAlias(src) && depth <= 4 &&
+                       ocl::Image2D::isFormatSupported(depth, cn, true) &&
+                       src.offset==0);
+    if (useSampler)
+    {
+        int wdepth = std::max(depth, CV_32S);
+        char buf[2][50];
+        cv::String compileOpts = format("-D USE_SAMPLER -D depth=%d -D T=%s -D T1=%s "
+                        "-D convertToDT=%s -D cn=%d",
+                        depth, ocl::typeToStr(type), ocl::typeToStr(depth),
+                        ocl::convertTypeStr(wdepth, depth, cn, buf[1], sizeof(buf[1])),
+                        cn);
+        k.create("resizeSampler", ocl::imgproc::resize_oclsrc, compileOpts);
+
+        if (k.empty())
+            useSampler = false;
+        else
+        {
+            // Convert the input into an OpenCL image type, using normalized channel data types
+            // and aliasing the UMat.
+            srcImage = ocl::Image2D(src, true, true);
+            // CLK_NORMALIZED_COORDS_FALSE use 0.5-based coordinate, so b + 0.5
+            k.args(srcImage, ocl::KernelArg::WriteOnly(dst));
+        }
+    }
+
+    if (interpolation == INTER_LINEAR && !useSampler)
+    {
+        char buf[2][50];
+        int wdepth = depth <= CV_8S ? CV_32S : std::max(depth, CV_32F);
+        int wtype = CV_MAKETYPE(wdepth, cn);
+        k.create("resizeLN", ocl::imgproc::resize_oclsrc,
+                    format("-D INTER_LINEAR -D depth=%d -D T=%s -D T1=%s "
+                        "-D WT=%s -D convertToWT=%s -D convertToDT=%s -D cn=%d "
+                        "-D INTER_RESIZE_COEF_BITS=%d",
+                        depth, ocl::typeToStr(type), ocl::typeToStr(depth), ocl::typeToStr(wtype),
+                        ocl::convertTypeStr(depth, wdepth, cn, buf[0], sizeof(buf[0])),
+                        ocl::convertTypeStr(wdepth, depth, cn, buf[1], sizeof(buf[1])),
+                        cn, INTER_RESIZE_COEF_BITS));
+        if (k.empty())
+            return false;
+
+        k.args(ocl::KernelArg::ReadOnly(src), ocl::KernelArg::WriteOnly(dst));
+    }
+    else if (interpolation == INTER_NEAREST)
+    {
+        k.create("resizeNN", ocl::imgproc::resize_oclsrc,
+                 format("-D INTER_NEAREST -D T=%s -D T1=%s -D cn=%d",
+                        ocl::vecopTypeToStr(type), ocl::vecopTypeToStr(depth), cn));
+        if (k.empty())
+            return false;
+
+        // b plus 0.5, see the description in resizeNN
+        k.args(ocl::KernelArg::ReadOnly(src), ocl::KernelArg::WriteOnly(dst));
+    }
+    else if (interpolation == INTER_AREA)
+    {
+        int wdepth = std::max(depth, is_area_fast ? CV_32S : CV_32F);
+        int wtype = CV_MAKE_TYPE(wdepth, cn);
+
+        char cvt[2][50];
+        String buildOption = format("-D INTER_AREA -D T=%s -D T1=%s -D WTV=%s -D convertToWTV=%s -D cn=%d",
+                                    ocl::typeToStr(type), ocl::typeToStr(depth), ocl::typeToStr(wtype),
+                                    ocl::convertTypeStr(depth, wdepth, cn, cvt[0], sizeof(cvt[0])), cn);
+
+        UMat alphaOcl, tabofsOcl, mapOcl;
+        UMat dmap, smap;
+
+        if (is_area_fast)
+        {
+            int wdepth2 = std::max(CV_32F, depth), wtype2 = CV_MAKE_TYPE(wdepth2, cn);
+            buildOption = buildOption + format(
+                " -D convertToT=%s -D WT2V=%s -D convertToWT2V=%s -D INTER_AREA_FAST"
+                " -D XSCALE=%d -D YSCALE=%d -D SCALE=%ff",
+                ocl::convertTypeStr(wdepth2, depth, cn, cvt[0], sizeof(cvt[0])),
+                ocl::typeToStr(wtype2), ocl::convertTypeStr(wdepth, wdepth2, cn, cvt[1], sizeof(cvt[1])),
+                1, 1, 1.0f / (2 * 3));
+
+            k.create("resizeAREA_FAST", ocl::imgproc::resize_oclsrc, buildOption);
+            if (k.empty())
+                return false;
+        }
+        else
+        {
+            buildOption = buildOption + format(" -D convertToT=%s", ocl::convertTypeStr(wdepth, depth, cn, cvt[0], sizeof(cvt[0])));
+            k.create("resizeAREA", ocl::imgproc::resize_oclsrc, buildOption);
+            if (k.empty())
+                return false;
+
+            int xytab_size = (src.rows + src.cols) << 1;
+            int tabofs_size = dst.rows + dst.cols + 2;
+
+            AutoBuffer<int> _xymap_tab(xytab_size), _xyofs_tab(tabofs_size);
+            AutoBuffer<float> _xyalpha_tab(xytab_size);
+            int * xmap_tab = _xymap_tab.data(), * ymap_tab = _xymap_tab.data() + (src.cols << 1);
+            float * xalpha_tab = _xyalpha_tab.data(), * yalpha_tab = _xyalpha_tab.data() + (src.cols << 1);
+            int * xofs_tab = _xyofs_tab.data(), * yofs_tab = _xyofs_tab.data() + src.rows + 1;
+
+            ocl_computeResizeAreaTabs(src.cols, dst.cols, M(0, 0), xmap_tab, xalpha_tab, xofs_tab);
+            ocl_computeResizeAreaTabs(src.rows, dst.rows, M(1, 0), ymap_tab, yalpha_tab, yofs_tab);
+
+            // loading precomputed arrays to GPU
+            Mat(1, xytab_size, CV_32FC1, _xyalpha_tab.data()).copyTo(alphaOcl);
+            Mat(1, xytab_size, CV_32SC1, _xymap_tab.data()).copyTo(mapOcl);
+            Mat(1, tabofs_size, CV_32SC1, _xyofs_tab.data()).copyTo(tabofsOcl);
+        }
+
+        ocl::KernelArg srcarg = ocl::KernelArg::ReadOnly(src), dstarg = ocl::KernelArg::WriteOnly(dst);
+
+        if (is_area_fast)
+            k.args(srcarg, dstarg);
+        else
+            k.args(srcarg, dstarg, M(0, 0), M(0, 1), ocl::KernelArg::PtrReadOnly(tabofsOcl),
                    ocl::KernelArg::PtrReadOnly(mapOcl), ocl::KernelArg::PtrReadOnly(alphaOcl));
 
         return k.run(2, globalsize, NULL, false);
@@ -4099,6 +4659,372 @@ void cv::resize( InputArray _src, OutputArray _dst, Size dsize,
     hal::resize(src.type(), src.data, src.step, src.cols, src.rows, dst.data, dst.step, dst.cols, dst.rows, inv_scale_x, inv_scale_y, interpolation);
 }
 
+void cv::resizeONNX(
+    InputArray _src, OutputArray _dst, Size dsize, Point2d scale = Point2d(),
+    int interpolation = INTER_LINEAR | INTER_HALF_PIXEL | INTER_ANTIALIAS,
+    double cubicCoeff = -0.75, Rect2d roi = Rect2d())
+{
+    CV_INSTRUMENT_REGION();
+
+    Size ssize = _src.size();
+    CV_CheckEQ(_src.dims(), 2, "only 2 dim image is support now");
+    CV_CheckFalse(ssize.empty(), "src size must not empty");
+    if( dsize.empty() )
+    {
+        CV_CheckGT(scale.x, 0.0, "scale must > 0 when not given dsize");
+        CV_CheckGT(scale.y, 0.0, "scale must > 0 when not given dsize");
+        dsize = Size(saturate_cast<int>(ssize.width  * scale.x),
+                     saturate_cast<int>(ssize.height * scale.y));
+        CV_CheckFalse(dsize.empty(), "dst size must not empty");
+    }
+    else
+    {
+        scale.x = static_cast<double>(dsize.width ) / ssize.width;
+        scale.y = static_cast<double>(dsize.height) / ssize.height;
+        CV_CheckGT(scale.x, 0.0, "computed scale <= 0 from given dsize");
+        CV_CheckGT(scale.y, 0.0, "computed scale <= 0 from given dsize");
+    }
+
+    static ResizeFunc linear_tab[] =
+    {
+        resizeGeneric_<
+            HResizeLinear<uchar, int, short,
+                INTER_RESIZE_COEF_SCALE,
+                HResizeLinearVec_8u32s>,
+            VResizeLinear<uchar, int, short,
+                FixedPtCast<int, uchar, INTER_RESIZE_COEF_BITS*2>,
+                VResizeLinearVec_32s8u> >,
+        0,
+        resizeGeneric_<
+            HResizeLinear<ushort, float, float, 1,
+                HResizeLinearVec_16u32f>,
+            VResizeLinear<ushort, float, float, Cast<float, ushort>,
+                VResizeLinearVec_32f16u> >,
+        resizeGeneric_<
+            HResizeLinear<short, float, float, 1,
+                HResizeLinearVec_16s32f>,
+            VResizeLinear<short, float, float, Cast<float, short>,
+                VResizeLinearVec_32f16s> >,
+        0,
+        resizeGeneric_<
+            HResizeLinear<float, float, float, 1,
+                HResizeLinearVec_32f>,
+            VResizeLinear<float, float, float, Cast<float, float>,
+                VResizeLinearVec_32f> >,
+        resizeGeneric_<
+            HResizeLinear<double, double, float, 1,
+                HResizeNoVec>,
+            VResizeLinear<double, double, float, Cast<double, double>,
+                VResizeNoVec> >,
+        0
+    };
+
+    static ResizeFunc cubic_tab[] =
+    {
+        resizeGeneric_<
+            HResizeCubic<uchar, int, short>,
+            VResizeCubic<uchar, int, short,
+                FixedPtCast<int, uchar, INTER_RESIZE_COEF_BITS*2>,
+                VResizeCubicVec_32s8u> >,
+        0,
+        resizeGeneric_<
+            HResizeCubic<ushort, float, float>,
+            VResizeCubic<ushort, float, float, Cast<float, ushort>,
+            VResizeCubicVec_32f16u> >,
+        resizeGeneric_<
+            HResizeCubic<short, float, float>,
+            VResizeCubic<short, float, float, Cast<float, short>,
+            VResizeCubicVec_32f16s> >,
+        0,
+        resizeGeneric_<
+            HResizeCubic<float, float, float>,
+            VResizeCubic<float, float, float, Cast<float, float>,
+            VResizeCubicVec_32f> >,
+        resizeGeneric_<
+            HResizeCubic<double, double, float>,
+            VResizeCubic<double, double, float, Cast<double, double>,
+            VResizeNoVec> >,
+        0
+    };
+
+    static ResizeFunc lanczos4_tab[] =
+    {
+        resizeGeneric_<HResizeLanczos4<uchar, int, short>,
+            VResizeLanczos4<uchar, int, short,
+            FixedPtCast<int, uchar, INTER_RESIZE_COEF_BITS*2>,
+            VResizeNoVec> >,
+        0,
+        resizeGeneric_<HResizeLanczos4<ushort, float, float>,
+            VResizeLanczos4<ushort, float, float, Cast<float, ushort>,
+            VResizeLanczos4Vec_32f16u> >,
+        resizeGeneric_<HResizeLanczos4<short, float, float>,
+            VResizeLanczos4<short, float, float, Cast<float, short>,
+            VResizeLanczos4Vec_32f16s> >,
+        0,
+        resizeGeneric_<HResizeLanczos4<float, float, float>,
+            VResizeLanczos4<float, float, float, Cast<float, float>,
+            VResizeLanczos4Vec_32f> >,
+        resizeGeneric_<HResizeLanczos4<double, double, float>,
+            VResizeLanczos4<double, double, float, Cast<double, double>,
+            VResizeNoVec> >,
+        0
+    };
+
+    static ResizeAreaFastFunc areafast_tab[] =
+    {
+        resizeAreaFast_<uchar, int, ResizeAreaFastVec<uchar, ResizeAreaFastVec_SIMD_8u> >,
+        0,
+        resizeAreaFast_<ushort, float, ResizeAreaFastVec<ushort, ResizeAreaFastVec_SIMD_16u> >,
+        resizeAreaFast_<short, float, ResizeAreaFastVec<short, ResizeAreaFastVec_SIMD_16s> >,
+        0,
+        resizeAreaFast_<float, float, ResizeAreaFastVec_SIMD_32f>,
+        resizeAreaFast_<double, double, ResizeAreaFastNoVec<double, double> >,
+        0
+    };
+
+    static ResizeAreaFunc area_tab[] =
+    {
+        resizeArea_<uchar, float>, 0, resizeArea_<ushort, float>,
+        resizeArea_<short, float>, 0, resizeArea_<float, float>,
+        resizeArea_<double, double>, 0
+    };
+
+    unsigned sampler = interpolation & INTER_SAMPLER_MASK;
+    unsigned nearest = interpolation & INTER_NEAREST_MODE_MASK;
+    unsigned coordinate = interpolation & INTER_COORDINATE_MASK;
+    unsigned anti_alias = interpolation & INTER_ANTIALIAS;
+    _dst.create(dsize, _src.type());
+
+    CV_Assert(sampler == INTER_NEAREST || sampler == INTER_LINEAR || sampler == INTER_CUBIC);
+    CV_Assert(
+        nearest == INTER_NEAREST_PREFER_FLOOR || nearest == INTER_NEAREST_PREFER_CEIL ||
+        nearest == INTER_NEAREST_FLOOR || nearest == INTER_NEAREST_CEIL);
+    CV_Assert(
+        coordinate == INTER_HALF_PIXEL || coordinate == INTER_HALF_PIXEL_PYTORCH ||
+        coordinate == INTER_HALF_PIXEL_SYMMETRIC || coordinate == INTER_ALIGN_CORNERS ||
+        coordinate == INTER_ASYMMETRIC || coordinate == INTER_TF_CROP_RESIZE);
+
+    Point2d inv_scale(1.0 / scale.x, 1.0 / scale.y);
+    // a simplified affine transformation matrix: x' = ax + b
+    Matx22f M;
+    reinterpret_cast<Vec2f&>(M.val[0]) =
+        interCoordinate(coordinate, dsize.width, ssize.width, inv_scale.x, roi.x, roi.x + roi.width);
+    reinterpret_cast<Vec2f&>(M.val[2]) =
+        interCoordinate(coordinate, dsize.height, ssize.height, inv_scale.y, roi.y, roi.y + roi.height);
+
+    // Fake reference to source. Resolves issue 13577 in case of src == dst.
+    UMat srcUMat;
+    if (_src.isUMat())
+        srcUMat = _src.getUMat();
+
+    CV_OCL_RUN(_dst.isUMat() && _src.cols() > 10 && _src.rows() > 10,
+               ocl_resizeONNX(_src, _dst, M, interpolation))
+
+    Mat src = _src.getMat(), dst = _dst.getMat();
+    if (dsize == ssize)
+    {
+        // Source and destination are of same size. Use simple copy.
+        src.copyTo(dst);
+        return;
+    }
+
+    if (sampler == INTER_NEAREST)
+    {
+        parallel_for_(Range(0, dst.rows),
+                      ResizeONNX_NNInvoker(src, dst, M, nearest), dst.rows * dst.cols / (1 << 16));
+        return;
+    }
+
+    if (sampler == INTER_LINEAR && coordinate == INTER_HALF_PIXEL &&
+        static_cast<int>(1.0))
+    {
+        // in case of scale_x && scale_y is equal to 2
+        // INTER_AREA (fast) also is equal to INTER_LINEAR
+        if( interpolation == INTER_LINEAR && is_area_fast && iscale_x == 2 && iscale_y == 2 )
+            interpolation = INTER_AREA;
+
+        // true "area" interpolation is only implemented for the case (scale_x >= 1 && scale_y >= 1).
+        // In other cases it is emulated using some variant of bilinear interpolation
+        if( interpolation == INTER_AREA && scale_x >= 1 && scale_y >= 1 )
+        {
+            if( is_area_fast )
+            {
+                int area = iscale_x*iscale_y;
+                size_t srcstep = src_step / src.elemSize1();
+                AutoBuffer<int> _ofs(area + dsize.width*cn);
+                int* ofs = _ofs.data();
+                int* xofs = ofs + area;
+                ResizeAreaFastFunc func = areafast_tab[depth];
+                CV_Assert( func != 0 );
+
+                for( sy = 0, k = 0; sy < iscale_y; sy++ )
+                    for( sx = 0; sx < iscale_x; sx++ )
+                        ofs[k++] = (int)(sy*srcstep + sx*cn);
+
+                for( dx = 0; dx < dsize.width; dx++ )
+                {
+                    int j = dx * cn;
+                    sx = iscale_x * j;
+                    for( k = 0; k < cn; k++ )
+                        xofs[j + k] = sx + k;
+                }
+
+                func( src, dst, ofs, xofs, iscale_x, iscale_y );
+                return;
+            }
+
+            ResizeAreaFunc func = area_tab[depth];
+            CV_Assert( func != 0 && cn <= 4 );
+
+            AutoBuffer<DecimateAlpha> _xytab((src_width + src_height)*2);
+            DecimateAlpha* xtab = _xytab.data(), *ytab = xtab + src_width*2;
+
+            int xtab_size = computeResizeAreaTab(src_width, dsize.width, cn, scale_x, xtab);
+            int ytab_size = computeResizeAreaTab(src_height, dsize.height, 1, scale_y, ytab);
+
+            AutoBuffer<int> _tabofs(dsize.height + 1);
+            int* tabofs = _tabofs.data();
+            for( k = 0, dy = 0; k < ytab_size; k++ )
+            {
+                if( k == 0 || ytab[k].di != ytab[k-1].di )
+                {
+                    CV_Assert( ytab[k].di == dy );
+                    tabofs[dy++] = k;
+                }
+            }
+            tabofs[dy] = ytab_size;
+
+            func( src, dst, xtab, xtab_size, ytab, ytab_size, tabofs );
+            return;
+        }
+    }
+
+    int xmin = 0, xmax = dsize.width, width = dsize.width*cn;
+    bool area_mode = interpolation == INTER_AREA;
+    bool fixpt = depth == CV_8U;
+    float fx, fy;
+    ResizeFunc func=0;
+    int ksize=0, ksize2;
+    if( interpolation == INTER_CUBIC )
+        ksize = 4, func = cubic_tab[depth];
+    else if( interpolation == INTER_LANCZOS4 )
+        ksize = 8, func = lanczos4_tab[depth];
+    else if( interpolation == INTER_LINEAR || interpolation == INTER_AREA )
+        ksize = 2, func = linear_tab[depth];
+    else
+        CV_Error( CV_StsBadArg, "Unknown interpolation method" );
+    ksize2 = ksize/2;
+
+    CV_Assert( func != 0 );
+
+    AutoBuffer<uchar> _buffer((width + dsize.height)*(sizeof(int) + sizeof(float)*ksize));
+    int* xofs = (int*)_buffer.data();
+    int* yofs = xofs + width;
+    float* alpha = (float*)(yofs + dsize.height);
+    short* ialpha = (short*)alpha;
+    float* beta = alpha + width*ksize;
+    short* ibeta = ialpha + width*ksize;
+    float cbuf[MAX_ESIZE] = {0};
+
+    for( dx = 0; dx < dsize.width; dx++ )
+    {
+        if( !area_mode )
+        {
+            fx = (float)((dx+0.5)*scale_x - 0.5);
+            sx = cvFloor(fx);
+            fx -= sx;
+        }
+        else
+        {
+            sx = cvFloor(dx*scale_x);
+            fx = (float)((dx+1) - (sx+1)*inv_scale_x);
+            fx = fx <= 0 ? 0.f : fx - cvFloor(fx);
+        }
+
+        if( sx < ksize2-1 )
+        {
+            xmin = dx+1;
+            if( sx < 0 && (interpolation != INTER_CUBIC && interpolation != INTER_LANCZOS4))
+                fx = 0, sx = 0;
+        }
+
+        if( sx + ksize2 >= src_width )
+        {
+            xmax = std::min( xmax, dx );
+            if( sx >= src_width-1 && (interpolation != INTER_CUBIC && interpolation != INTER_LANCZOS4))
+                fx = 0, sx = src_width-1;
+        }
+
+        for( k = 0, sx *= cn; k < cn; k++ )
+            xofs[dx*cn + k] = sx + k;
+
+        if( interpolation == INTER_CUBIC )
+            interpolateCubic( fx, cbuf );
+        else if( interpolation == INTER_LANCZOS4 )
+            interpolateLanczos4( fx, cbuf );
+        else
+        {
+            cbuf[0] = 1.f - fx;
+            cbuf[1] = fx;
+        }
+        if( fixpt )
+        {
+            for( k = 0; k < ksize; k++ )
+                ialpha[dx*cn*ksize + k] = saturate_cast<short>(cbuf[k]*INTER_RESIZE_COEF_SCALE);
+            for( ; k < cn*ksize; k++ )
+                ialpha[dx*cn*ksize + k] = ialpha[dx*cn*ksize + k - ksize];
+        }
+        else
+        {
+            for( k = 0; k < ksize; k++ )
+                alpha[dx*cn*ksize + k] = cbuf[k];
+            for( ; k < cn*ksize; k++ )
+                alpha[dx*cn*ksize + k] = alpha[dx*cn*ksize + k - ksize];
+        }
+    }
+
+    for( dy = 0; dy < dsize.height; dy++ )
+    {
+        if( !area_mode )
+        {
+            fy = fmaf(a_y, (float)(dy), b_y);
+            sy = cvFloor(fy);
+            fy -= sy;
+        }
+        else
+        {
+            sy = cvFloor(dy*scale_y);
+            fy = (float)((dy+1) - (sy+1)*inv_scale_y);
+            fy = fy <= 0 ? 0.f : fy - cvFloor(fy);
+        }
+
+        yofs[dy] = sy;
+        if( interpolation == INTER_CUBIC )
+            interpolateCubic( fy, cbuf );
+        else if( interpolation == INTER_LANCZOS4 )
+            interpolateLanczos4( fy, cbuf );
+        else
+        {
+            cbuf[0] = 1.f - fy;
+            cbuf[1] = fy;
+        }
+
+        if( fixpt )
+        {
+            for( k = 0; k < ksize; k++ )
+                ibeta[dy*ksize + k] = saturate_cast<short>(cbuf[k]*INTER_RESIZE_COEF_SCALE);
+        }
+        else
+        {
+            for( k = 0; k < ksize; k++ )
+                beta[dy*ksize + k] = cbuf[k];
+        }
+    }
+
+    func( src, dst, xofs, fixpt ? (void*)ialpha : (void*)alpha, yofs,
+          fixpt ? (void*)ibeta : (void*)beta, xmin, xmax, ksize );
+}
+
 
 CV_IMPL void
 cvResize( const CvArr* srcarr, CvArr* dstarr, int method )
@@ -4108,5 +5034,6 @@ cvResize( const CvArr* srcarr, CvArr* dstarr, int method )
     cv::resize( src, dst, dst.size(), (double)dst.cols/src.cols,
         (double)dst.rows/src.rows, method );
 }
+
 
 /* End of file. */
