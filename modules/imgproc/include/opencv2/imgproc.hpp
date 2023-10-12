@@ -2443,17 +2443,17 @@ https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
 
 scale can not be default argument otherwise this function will have same signature as resize.
 
-to mimic resize:
-    INTER_NEAREST : NEAREST + ASYMMETRIC + PREFER_FLOOR
-    INTER_LINEAR  : LINEAR + HALF_PIXEL
-    INTER_CUBIC   : CUBIC + HALF_PIXEL + cubicCoef -0.75
+to mimic resize, given dsize and:
+    INTER_NEAREST : ASYMMETRIC + NEAREST_FLOOR
+    INTER_LINEAR  : HALF_PIXEL
+    INTER_CUBIC   : HALF_PIXEL + cubicCoeff(-0.75)
 
 @param src input image.
 @param dst output image; it has the size dsize (when it is non-zero) or the size computed from
 src.size(), scale; the type of dst is the same as of src.
 @param dsize output image size; if it equals zero (`None` in Python), it is computed as:
- \f[\texttt{dsize = Size(round(scale.x * src.cols), round(scale.y * src.rows))}\f]
- Either dsize or both fx and fy must be non-zero.
+ \f[\texttt{dsize = Size(int(scale.x * src.cols), int(scale.y * src.rows))}\f]
+ Either dsize or scale must be non-zero.
 @param scale scale factor; use same define as ONNX, if it's less than 1, it's sampling down, otherwise, it's upsampling.
 @param interpolation interpolation / coordiante, see #InterpolationFlags and #ResizeONNXFlags
 @param cubicCoeff cubic sampling coeff; range \f[[-1.0, 0)\f]
@@ -2464,7 +2464,7 @@ src.size(), scale; the type of dst is the same as of src.
 CV_EXPORTS_W void resizeOnnx(
     InputArray src, OutputArray dst, Size dsize, Point2d scale = Point2d(),
     int interpolation = INTER_LINEAR | INTER_HALF_PIXEL | INTER_ANTIALIAS,
-    double cubicCoeff = -0.75, Rect2d roi = Rect2d());
+    float cubicCoeff = -0.75f, Rect2d const& roi = Rect2d());
 
 /** @brief Applies an affine transformation to an image.
 
