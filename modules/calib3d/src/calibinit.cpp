@@ -505,10 +505,18 @@ bool findChessboardCorners(InputArray image_, Size pattern_size,
 
     Mat thresh_img_new = img.clone();
   
-    int min_size = cvRound((img.cols * img.rows * 0.05) / ((pattern_size.width+1) * (pattern_size.height+1)));
-    if(min_size%2==0) min_size += 1;
-    adaptiveThreshold(img, thresh_img_new, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, min_size, 0);
-  
+    if(flags & CALIB_CB_ADAPTIVE_THRESH)
+    {
+      // Assume that the checkerboard occupies 5% of the image
+      int min_size = cvRound((img.cols * img.rows * 0.05) / ((pattern_size.width+1) * (pattern_size.height+1)));
+      if(min_size%2==0) min_size += 1;
+      adaptiveThreshold(img, thresh_img_new, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, min_size, 0);
+    }
+    else
+    {
+      icvBinarizationHistogramBased(thresh_img_new); // process image in-place
+    }
+    
     SHOW("New binarization", thresh_img_new);
 
     if (flags & CALIB_CB_FAST_CHECK)
