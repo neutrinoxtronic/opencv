@@ -504,7 +504,7 @@ bool findChessboardCorners(InputArray image_, Size pattern_size,
     int prev_sqr_size = 0;
 
     Mat thresh_img_new = img.clone();
-  
+
     if(flags & CALIB_CB_ADAPTIVE_THRESH)
     {
       // Assume that the checkerboard occupies 5% of the image
@@ -516,7 +516,7 @@ bool findChessboardCorners(InputArray image_, Size pattern_size,
     {
       icvBinarizationHistogramBased(thresh_img_new); // process image in-place
     }
-    
+
     SHOW("New binarization", thresh_img_new);
 
     if (flags & CALIB_CB_FAST_CHECK)
@@ -1401,7 +1401,7 @@ int ChessBoardDetector::checkQuadGroup(std::vector<ChessBoardQuad*>& quad_group,
     }
 
     if (corner_count != pattern_size.width*pattern_size.height)
-        goto finalize;
+      goto finalize;
 
 {
     ChessBoardCorner* first = NULL, *first2 = NULL;
