@@ -1794,6 +1794,76 @@ template<typename R> struct TheTest
         return *this;
     }
 
+    TheTest & test_exp_fp32()
+    {
+        int n = VTraits<R>::vlanes();
+        float boundary = 89.f;
+        Data<R> dataA, dataB, dataC, dataD;
+        dataA *= boundary / n;
+        dataB *= -boundary / n;
+        dataC *= 0.0001f;
+        dataD *= -0.0001f;
+
+        R a = dataA, b = dataB, c = dataC, d = dataD;
+        Data<R> resA = v_exp(a);
+        Data<R> resB = v_exp(b);
+        Data<R> resC = v_exp(c);
+        Data<R> resD = v_exp(d);
+
+        for (int i = 0; i < n; ++i)
+        {
+            SCOPED_TRACE(cv::format("i=%d", i));
+            if(dataA[i] >= 89.f)
+                EXPECT_EQ(std::numeric_limits<float>::infinity(), resA[i]);
+            else
+                EXPECT_COMPARE_EQ_((float)exp(dataA[i]), resA[i]);
+
+            if(dataB[i] <= -89.f)
+                EXPECT_COMPARE_EQ_(0.f, resB[i]);
+            else
+                EXPECT_COMPARE_EQ_((float)exp(dataB[i]), resB[i]);
+            EXPECT_COMPARE_EQ_((float)exp(dataC[i]), resC[i]);
+            EXPECT_COMPARE_EQ_((float)exp(dataD[i]), resD[i]);
+        }
+        return *this;
+    }
+
+    TheTest & test_exp_fp64()
+    {
+#if CV_SIMD_64F || CV_SIMD_SCALABLE_64F
+        int n = VTraits<R>::vlanes();
+        double boundary = 710.;
+        Data<R> dataA, dataB, dataC, dataD;
+        dataA *= boundary / n;
+        dataB *= -boundary / n;
+        dataC *= 0.0001;
+        dataD *= -0.0001;
+
+        R a = dataA, b = dataB, c = dataC, d = dataD;
+        Data<R> resA = v_exp(a);
+        Data<R> resB = v_exp(b);
+        Data<R> resC = v_exp(c);
+        Data<R> resD = v_exp(d);
+
+        for (int i = 0; i < n; ++i)
+        {
+            SCOPED_TRACE(cv::format("i=%d", i));
+            if(dataA[i] >= 710.)
+                EXPECT_EQ(std::numeric_limits<double>::infinity(), resA[i]);
+            else
+                EXPECT_COMPARE_EQ_(exp(dataA[i]), resA[i]);
+
+            if(dataB[i] <= -710.)
+                EXPECT_COMPARE_EQ_(0., resB[i]);
+            else
+                EXPECT_COMPARE_EQ_(exp(dataB[i]), resB[i]);
+
+            EXPECT_COMPARE_EQ_(exp(dataC[i]), resC[i]);
+            EXPECT_COMPARE_EQ_(exp(dataD[i]), resD[i]);
+        }
+#endif
+        return *this;
+    }
 };
 
 #define DUMP_ENTRY(type) printf("SIMD%d: %s\n", 8*VTraits<v_uint8>::vlanes(), CV__TRACE_FUNCTION);
@@ -2107,6 +2177,7 @@ void test_hal_intrin_float32()
         .test_extract_highest()
         .test_broadcast_highest()
         .test_pack_triplets()
+        .test_exp_fp32()
 #if CV_SIMD_WIDTH == 32
         .test_extract<4>().test_extract<5>().test_extract<6>().test_extract<7>()
         .test_rotate<4>().test_rotate<5>().test_rotate<6>().test_rotate<7>()
@@ -2137,6 +2208,7 @@ void test_hal_intrin_float64()
         .test_rotate<0>().test_rotate<1>()
         .test_extract_n<0>().test_extract_n<1>()
         .test_extract_highest()
+        .test_exp_fp64()
         //.test_broadcast_element<0>().test_broadcast_element<1>()
 #if CV_SIMD_WIDTH == 32
         .test_extract<2>().test_extract<3>()
