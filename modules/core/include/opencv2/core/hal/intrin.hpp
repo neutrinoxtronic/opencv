@@ -1228,7 +1228,35 @@ namespace CV__SIMD_NAMESPACE {
 
 //! @name Exponential
 //! @{
-//! @brief Calculates exponent of every vector element
+//! @brief Calculates exponent of every vector element.
+
+    /* Universal intrinsic implementation of exponential function for float32 vectors.
+
+       Inspired by Intel Approximate Math library, and based on the
+       corresponding algorithms of the cephes math library
+    */
+
+    /* Copyright (C) 2011  Julien Pommier
+
+      This software is provided 'as-is', without any express or implied
+      warranty.  In no event will the authors be held liable for any damages
+      arising from the use of this software.
+
+      Permission is granted to anyone to use this software for any purpose,
+      including commercial applications, and to alter it and redistribute it
+      freely, subject to the following restrictions:
+
+      1. The origin of this software must not be misrepresented; you must not
+         claim that you wrote the original software. If you use this software
+         in a product, an acknowledgment in the product documentation would be
+         appreciated but is not required.
+      2. Altered source versions must be plainly marked as such, and must not be
+         misrepresented as being the original software.
+      3. This notice may not be removed or altered from any source distribution.
+
+      (this is the zlib license)
+    */
+
     inline v_float32 v_exp(const v_float32 &x) {
         const v_float32 _vexp_lo_f32 = vx_setall_f32(-88.3762626647949f);
         const v_float32 _vexp_hi_f32 = vx_setall_f32(89.f);
@@ -1274,6 +1302,38 @@ namespace CV__SIMD_NAMESPACE {
     }
 
 #if CV_SIMD_64F || CV_SIMD_SCALABLE_64F
+
+   /*
+    * Universal intrinsic implementation of exponential function for float64 vectors.
+    * The implementation is inspired by the approach outlined from https://root.cern.ch/root/html608/exp_8h_source.html
+    */
+
+   /*
+    * exp.h
+    * The basic idea is to exploit Pade polynomials.
+    * A lot of ideas were inspired by the cephes math library (by Stephen L. Moshier
+    * moshier@na-net.ornl.gov) as well as actual code.
+    * The Cephes library can be found here:  http://www.netlib.org/cephes/
+    *
+    *  Created on: Jun 23, 2012
+    *      Author: Danilo Piparo, Thomas Hauth, Vincenzo Innocente
+    */
+
+   /*
+    * VDT is free software: you can redistribute it and/or modify
+    * it under the terms of the GNU Lesser Public License as published by
+    * the Free Software Foundation, either version 3 of the License, or
+    * (at your option) any later version.
+    *
+    * This program is distributed in the hope that it will be useful,
+    * but WITHOUT ANY WARRANTY; without even the implied warranty of
+    * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    * GNU Lesser Public License for more details.
+    *
+    * You should have received a copy of the GNU Lesser Public License
+    * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    */
+
     inline v_float64 v_exp(const v_float64 &x) {
         const v_float64 _vexp_lo_f64 = vx_setall_f64(-709.43613930310391424428);
         const v_float64 _vexp_hi_f64 = vx_setall_f64(710.);
