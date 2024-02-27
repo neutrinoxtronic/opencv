@@ -1797,7 +1797,6 @@ template<typename R> struct TheTest
     template<typename T>
     TheTest &__test_exp(T dataMax, T step, T range, double e_thr, double diff_thr, double enlarge_factor) {
         int n = VTraits<R>::vlanes();
-        bool is_fp32 = std::is_same<R, v_float32>::value;
 
         Data<R> dataNAN, data0, data1, dataInf, dataNegInf, dataMaxVal;
         for (int i = 0; i < n; ++i) {
