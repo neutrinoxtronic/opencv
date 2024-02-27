@@ -1794,75 +1794,85 @@ template<typename R> struct TheTest
         return *this;
     }
 
-    TheTest & test_exp_fp32()
-    {
+    template<typename T>
+    TheTest &__test_exp(T dataMax, T step, T range, double e_thr, double diff_thr, double enlarge_factor) {
         int n = VTraits<R>::vlanes();
-        float boundary = 89.f;
-        Data<R> dataA, dataB, dataC, dataD;
-        dataA *= boundary / n;
-        dataB *= -boundary / n;
-        dataC *= 0.0001f;
-        dataD *= -0.0001f;
+        bool is_fp32 = std::is_same<R, v_float32>::value;
 
-        R a = dataA, b = dataB, c = dataC, d = dataD;
-        Data<R> resA = v_exp(a);
-        Data<R> resB = v_exp(b);
-        Data<R> resC = v_exp(c);
-        Data<R> resD = v_exp(d);
+        Data<R> dataNAN, data0, data1, dataInf, dataNegInf, dataMaxVal;
+        for (int i = 0; i < n; ++i) {
+            dataNAN[i] = NAN;
+            data0[i] = 0;
+            data1[i] = 1;
+            dataInf[i] = INFINITY;
+            dataNegInf[i] = -INFINITY;
+            dataMaxVal[i] = dataMax;
+        }
+        Data<R> resNAN = v_exp((R) dataNAN);
+        Data<R> res0 = v_exp((R) data0);
+        Data<R> res1 = v_exp((R) data1);
+        Data<R> resInf = v_exp((R) dataInf);
+        Data<R> resNegInf = v_exp((R) dataNegInf);
+        Data<R> resMaxVal = v_exp((R) dataMaxVal);
+        double e = std::exp(1);
+        for (int j = 0; j < n; ++j) {
+            EXPECT_TRUE(std::isnan(resNAN[j]));
+            EXPECT_EQ(1, res0[j]);
+            EXPECT_NEAR(e, res1[j], e_thr);
+            EXPECT_EQ(INFINITY, resInf[j]);
+            EXPECT_EQ(0, resNegInf[j]);
+            EXPECT_LT(resMaxVal[j], INFINITY);
+        }
 
-        for (int i = 0; i < n; ++i)
-        {
-            SCOPED_TRACE(cv::format("i=%d", i));
-            if(dataA[i] >= 89.f)
-                EXPECT_EQ(std::numeric_limits<float>::infinity(), resA[i]);
-            else
-                EXPECT_COMPARE_EQ_((float)exp(dataA[i]), resA[i]);
+        for (T i = dataMax + 1 + step; i <= dataMax + 1 + range;) {
+            Data<R> dataPos, dataNeg;
+            for (int j = 0; j < n; ++j) {
+                dataPos[j] = i;
+                dataNeg[j] = -i;
+                i += step;
+            }
+            Data<R> resPos = v_exp(dataPos);
+            Data<R> resNeg = v_exp(dataNeg);
+            for (int j = 0; j < n; ++j) {
+                EXPECT_EQ(INFINITY, resPos[j]);
+                EXPECT_EQ(0, resNeg[j]);
+            }
+        }
 
-            if(dataB[i] <= -89.f)
-                EXPECT_COMPARE_EQ_(0.f, resB[i]);
-            else
-                EXPECT_COMPARE_EQ_((float)exp(dataB[i]), resB[i]);
-            EXPECT_COMPARE_EQ_((float)exp(dataC[i]), resC[i]);
-            EXPECT_COMPARE_EQ_((float)exp(dataD[i]), resD[i]);
+        for (int i = 0; i < 10000; i++) {
+            Data<R> dataRand;
+            for (int j = 0; j < n; ++j) {
+                dataRand[j] = 2 * range * (rand() / (double) RAND_MAX - 0.5);
+            }
+            R dRand = dataRand;
+            Data<R> resRand = v_exp(dRand);
+
+            for (int j = 0; j < n; ++j) {
+                SCOPED_TRACE(cv::format("i=%d", j));
+                double std_exp = std::exp(dataRand[j]);
+                if (std_exp > FLT_MAX) {
+                    EXPECT_GT(resRand[j], FLT_MAX * 0.99);
+                } else if (resRand[j] == INFINITY) {
+                    EXPECT_GT(std_exp, FLT_MAX * 0.7);
+                } else {
+                    EXPECT_GE(resRand[j], 0);
+                    EXPECT_LT(std::abs(resRand[j] - std_exp), diff_thr * (std::abs(std_exp) + FLT_MIN * enlarge_factor));
+                }
+            }
         }
         return *this;
     }
 
-    TheTest & test_exp_fp64()
-    {
+    TheTest &test_exp_fp32() {
+        return __test_exp<float>(88.0f, 0.1f, 11.0f, 1e-7, 1e-5, 80000);
+    }
+
+    TheTest &test_exp_fp64() {
 #if CV_SIMD_64F || CV_SIMD_SCALABLE_64F
-        int n = VTraits<R>::vlanes();
-        double boundary = 710.;
-        Data<R> dataA, dataB, dataC, dataD;
-        dataA *= boundary / n;
-        dataB *= -boundary / n;
-        dataC *= 0.0001;
-        dataD *= -0.0001;
-
-        R a = dataA, b = dataB, c = dataC, d = dataD;
-        Data<R> resA = v_exp(a);
-        Data<R> resB = v_exp(b);
-        Data<R> resC = v_exp(c);
-        Data<R> resD = v_exp(d);
-
-        for (int i = 0; i < n; ++i)
-        {
-            SCOPED_TRACE(cv::format("i=%d", i));
-            if(dataA[i] >= 710.)
-                EXPECT_EQ(std::numeric_limits<double>::infinity(), resA[i]);
-            else
-                EXPECT_COMPARE_EQ_(exp(dataA[i]), resA[i]);
-
-            if(dataB[i] <= -710.)
-                EXPECT_COMPARE_EQ_(0., resB[i]);
-            else
-                EXPECT_COMPARE_EQ_(exp(dataB[i]), resB[i]);
-
-            EXPECT_COMPARE_EQ_(exp(dataC[i]), resC[i]);
-            EXPECT_COMPARE_EQ_(exp(dataD[i]), resD[i]);
-        }
-#endif
+        return __test_exp<double>(709.0, 0.1, 10.0, 1e-15, 1e-15, 100);
+#else
         return *this;
+#endif
     }
 };
 
