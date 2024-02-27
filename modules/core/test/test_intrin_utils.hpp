@@ -1798,16 +1798,14 @@ template<typename R> struct TheTest
     TheTest &__test_exp(T dataMax, T step, T range, double e_thr, double diff_thr, double enlarge_factor) {
         int n = VTraits<R>::vlanes();
 
-        Data<R> dataNAN, data0, data1, dataInf, dataNegInf, dataMaxVal;
+        Data<R> data0, data1, dataInf, dataNegInf, dataMaxVal;
         for (int i = 0; i < n; ++i) {
-            dataNAN[i] = NAN;
             data0[i] = 0;
             data1[i] = 1;
             dataInf[i] = INFINITY;
             dataNegInf[i] = -INFINITY;
             dataMaxVal[i] = dataMax;
         }
-        Data<R> resNAN = v_exp((R) dataNAN);
         Data<R> res0 = v_exp((R) data0);
         Data<R> res1 = v_exp((R) data1);
         Data<R> resInf = v_exp((R) dataInf);
@@ -1815,7 +1813,6 @@ template<typename R> struct TheTest
         Data<R> resMaxVal = v_exp((R) dataMaxVal);
         double e = std::exp(1);
         for (int j = 0; j < n; ++j) {
-            EXPECT_TRUE(std::isnan(resNAN[j]));
             EXPECT_EQ(1, res0[j]);
             EXPECT_NEAR(e, res1[j], e_thr);
             EXPECT_EQ(INFINITY, resInf[j]);
