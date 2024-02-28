@@ -1838,7 +1838,7 @@ template<typename R> struct TheTest
         for (int i = 0; i < 10000; i++) {
             Data<R> dataRand;
             for (int j = 0; j < n; ++j) {
-                dataRand[j] = 2 * range * (rand() / (double) RAND_MAX - 0.5);
+                dataRand[j] = (T) (2 * range * (rand() / (double) RAND_MAX - 0.5));
             }
             R dRand = dataRand;
             Data<R> resRand = v_exp(dRand);
