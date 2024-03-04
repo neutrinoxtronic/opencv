@@ -813,35 +813,6 @@ private:
     static const char* const ocl_kernel_name;
 };
 
-// struct GeluFunctor : public BaseDefaultFunctor<GeluFunctor>
-// {
-//     typedef GeluLayer Layer;
-
-//     explicit GeluFunctor() {}
-
-//     bool supportBackend(int backendId, int)
-//     {
-//         return backendId == DNN_BACKEND_OPENCV || backendId == DNN_BACKEND_CUDA;
-//     }
-
-//     inline float calculate(float x) const
-//     {
-//         return 0.5f * x * (1.0f + erf(x * M_SQRT1_2));
-//     }
-
-// #ifdef HAVE_CUDA
-//     Ptr<BackendNode> initCUDA(int target, csl::Stream stream)
-//     {
-//         return make_cuda_node<cuda4dnn::GeluOp>(target, stream);
-//     }
-// #endif
-
-//     int64 getFLOPSPerElement() const { return 100; }
-// };
-
-// template<>
-// const char* const BaseDefaultFunctor<GeluFunctor>::ocl_kernel_name = "GeluForward";
-
 #if CV_SIMD128
 namespace {
     // TODO: This is taken from https://github.com/opencv/opencv/pull/24941.
@@ -1051,6 +1022,45 @@ struct GeluFunctor : public BaseFunctor {
     Ptr<BackendNode> initCUDA(int target, csl::Stream stream)
     {
         return make_cuda_node<cuda4dnn::GeluOp>(target, stream);
+    }
+#endif
+
+#ifdef HAVE_OPENCL
+    bool initKernel(ocl::Kernel &ker, const UMat &src) const
+    {
+        String buildopt = oclGetTMacro(src);
+
+        if (!ker.create("GeluForward", ocl::dnn::activations_oclsrc, buildopt))
+            return false;
+
+        return true;
+    }
+
+    bool applyOCL(InputArrayOfArrays inps, OutputArrayOfArrays outs, OutputArrayOfArrays internals)
+    {
+        std::vector<UMat> inputs;
+        std::vector<UMat> outputs;
+
+        inps.getUMatVector(inputs);
+        outs.getUMatVector(outputs);
+
+        for (size_t i = 0; i < inputs.size(); i++)
+        {
+            UMat& src = inputs[i];
+            UMat& dst = outputs[i];
+            CV_Assert(src.isContinuous() && dst.isContinuous() && !src.offset && !dst.offset);
+
+            ocl::Kernel kernel;
+            CV_Assert(initKernel(kernel, src));
+            kernel.set(0, (int)src.total());
+            kernel.set(1, ocl::KernelArg::PtrReadOnly(src));
+            kernel.set(2, ocl::KernelArg::PtrWriteOnly(dst));
+
+            size_t gSize = src.total();
+            CV_Assert(kernel.run(1, &gSize, NULL, false));
+        }
+
+        return true;
     }
 #endif
 

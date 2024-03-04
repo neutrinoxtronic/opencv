@@ -996,7 +996,7 @@ PERF_TEST_P_(Layer_Elementwise, elementwise) {
     {
         net.setInput(input);
         net.setPreferableBackend(backend_id);
-        net.setPreferableBackend(target_id);
+        net.setPreferableTarget(target_id);
         Mat out = net.forward();
     }
 
