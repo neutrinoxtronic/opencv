@@ -957,6 +957,10 @@ namespace paddle {
 }
 
 namespace wiki {
+/* Reference from wiki:
+    https://en.wikipedia.org/wiki/Error_function#Approximation_with_elementary_functions
+   Second of Abramowitz and Stegun approximation.
+*/
     constexpr float c_erf_coef0 = 0.0000430638f;
     constexpr float c_erf_coef1 = 0.0002765672f;
     constexpr float c_erf_coef2 = 0.0001520143;
@@ -965,8 +969,7 @@ namespace wiki {
     constexpr float c_erf_coef5 = 0.0705230784f;
 
     inline float erf(float v) {
-        float sign = v >= 0 ? 1.f : -1.f,
-              t = std::fabs(v);
+        float t = std::fabs(v);
         float d = c_erf_coef0 * t + c_erf_coef1;
         d = d * t + c_erf_coef2;
         d = d * t + c_erf_coef3;
@@ -976,7 +979,8 @@ namespace wiki {
         d = 1.f / d;
         d *= d; d *= d;
         d *= d; d *= d;
-        return sign * (1.f - d);
+        d = 1.f - d;
+        return std::copysign(d, v);
     }
 
 #if CV_SIMD128
@@ -988,8 +992,11 @@ namespace wiki {
                     coef4 = v_setall_f32(c_erf_coef4),
                     coef5 = v_setall_f32(c_erf_coef5);
         v_float32x4 ones = v_setall_f32(1.0f),
-                    sign_mask = v_setall_f32(0x80000000),
+                    neg_zeros = v_setall_f32(-0.f),
                     t = v_abs(v);
+
+        // sign(v)
+        v_float32x4 sign_mask = v_and(neg_zeros, v);
 
         v_float32x4 d = v_fma(coef0, t, coef1);
         d = v_fma(d, t, coef2);
@@ -1020,13 +1027,13 @@ namespace pytorch {
     constexpr float c_erf_coef5 = 0.254829592f;
 
     inline float erf(float v) {
-        float sx = v >= 0 ? 1.f : -1.f;
         float t = 1.f / fma(fabs(v), c_erf_coef0, 1.f);
         float r = fma(c_erf_coef1, t, c_erf_coef2);
         r = fma(r, t, c_erf_coef3);
         r = fma(r, t, c_erf_coef4);
         r = fma(r, t, c_erf_coef5);
-        return sx * (1.f - r * t * exp(-v * v));
+        r = 1.f - r * t * exp(-v * v);
+        return std::copysign(r, v);;
     }
 
 #if CV_SIMD128
@@ -1084,17 +1091,24 @@ namespace pytorch {
                     coef4 = v_setall_f32(c_erf_coef4),
                     coef5 = v_setall_f32(c_erf_coef5);
         v_float32x4 ones = v_setall_f32(1.0f),
-                    neg_ones = v_setall_f32(-1.0f),
-                    sign_mask = v_setall_f32(0x80000000),
+                    neg_zeros = v_setall_f32(-0.f),
                     t = v_abs(v);
+        // sign(v)
+        v_float32x4 sign_mask = v_and(neg_zeros, v);
+
         t = v_div(ones, v_fma(coef0, t, ones));
         v_float32x4 r = v_fma(coef1, t, coef2);
         r = v_fma(r, t, coef3);
         r = v_fma(r, t, coef4);
         r = v_fma(r, t, coef5);
-        v_float32x4 exp = v_exp(v_mul(v, v_mul(neg_ones, v)));
-        r = v_mul(r, v_mul(t, exp));
-        r = v_sub(ones, r);
+        // - v * v
+        v_float32x4 pow_2 = v_mul(v, v);
+        v_float32x4 neg_pow_2 = v_xor(neg_zeros, pow_2);
+        // - exp(- v * v)
+        v_float32x4 exp = v_exp(neg_pow_2);
+        v_float32x4 neg_exp = v_xor(neg_zeros, exp);
+        v_float32x4 res = v_mul(t, neg_exp);
+        res = v_fma(r, res, ones);
         return v_xor(sign_mask, r);
     }
 #endif
@@ -1218,6 +1232,13 @@ struct GeluFunctor : public BaseFunctor {
         return true;
     }
 #endif
+
+#ifdef HAVE_DNN_NGRAPH
+    std::shared_ptr<ngraph::Node> initNgraphAPI(const ngraph::Output<ngraph::Node>& node)
+    {
+        return std::make_shared<ngraph::op::Gelu>(node);
+    }
+#endif  // HAVE_DNN_NGRAPH
 
     int64 getFLOPSPerElement() const { return 100; }
 };
