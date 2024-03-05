@@ -813,8 +813,53 @@ private:
     static const char* const ocl_kernel_name;
 };
 
-#if CV_SIMD128
+
 namespace paddle {
+    /* Reference from Paddle-Lite
+        https://github.com/PaddlePaddle/Paddle-Lite/blob/develop/lite/backends/arm/math/activation.cc#L1155
+    */
+    constexpr float c_erff_r0_p0     = -1.72853470e-5f;
+    constexpr float c_erff_r0_p1     = 3.83197126e-4f;
+    constexpr float c_erff_r0_p2     = -3.88396438e-3f;
+    constexpr float c_erff_r0_p3     = 2.42546219e-2f;
+    constexpr float c_erff_r0_p4     = -1.06777877e-1f;
+    constexpr float c_erff_r0_p5     = -6.34846687e-1f;
+    constexpr float c_erff_r0_p6     = -1.28717512e-1f;
+    constexpr float c_erff_r1_p0     = -5.96761703e-4f;
+    constexpr float c_erff_r1_p1     = 4.99119423e-3f;
+    constexpr float c_erff_r1_p2     = -2.67681349e-2f;
+    constexpr float c_erff_r1_p3     = 1.12819925e-1f;
+    constexpr float c_erff_r1_p4     = -3.76125336e-1f;
+    constexpr float c_erff_r1_p5     = 1.28379166e-1f;
+    constexpr float c_erff_threshold = 0.927734375f;
+
+    inline float erf(float v) {
+        float r, s, t, u;
+        t = std::fabs(v);
+        s = v * v;
+        if (t > c_erff_threshold) {
+            r = std::fma(c_erff_r0_p0, t, c_erff_r0_p1);
+            u = std::fma(c_erff_r0_p2, t, c_erff_r0_p3);
+            r = std::fma(r, s, u);
+            r = std::fma(r, t, c_erff_r0_p4);
+            r = std::fma(r, t, c_erff_r0_p5);
+            r = std::fma(r, t, c_erff_r0_p6);
+            r = std::fma(r, t, -t);
+            r = 1.0f - std::exp(r);
+            r = std::copysign(r , v);
+        } else {
+            r = c_erff_r1_p0;
+            r = std::fma(r, s, c_erff_r1_p1);
+            r = std::fma(r, s, c_erff_r1_p2);
+            r = std::fma(r, s, c_erff_r1_p3);
+            r = std::fma(r, s, c_erff_r1_p4);
+            r = std::fma(r, s, c_erff_r1_p5);
+            r = std::fma(r, v, v);
+        }
+        return r;
+    }
+
+#if CV_SIMD128
     // TODO: This is taken from https://github.com/opencv/opencv/pull/24941.
     //       Remove this once the PR is merged.
     inline v_float32 v_exp(const v_float32 &x) {
@@ -859,50 +904,6 @@ namespace paddle {
         _vexp_y = v_fma(_vexp_y, _vexp_xx, _vexp_x);
         _vexp_y = v_add(_vexp_y, _vexp_one_fp32);
         return v_mul(_vexp_y, v_reinterpret_as_f32(_vexp_mm));
-    }
-
-    /* Reference from Paddle-Lite
-        https://github.com/PaddlePaddle/Paddle-Lite/blob/develop/lite/backends/arm/math/activation.cc#L1155
-    */
-    constexpr float c_erff_r0_p0     = -1.72853470e-5f;
-    constexpr float c_erff_r0_p1     = 3.83197126e-4f;
-    constexpr float c_erff_r0_p2     = -3.88396438e-3f;
-    constexpr float c_erff_r0_p3     = 2.42546219e-2f;
-    constexpr float c_erff_r0_p4     = -1.06777877e-1f;
-    constexpr float c_erff_r0_p5     = -6.34846687e-1f;
-    constexpr float c_erff_r0_p6     = -1.28717512e-1f;
-    constexpr float c_erff_r1_p0     = -5.96761703e-4f;
-    constexpr float c_erff_r1_p1     = 4.99119423e-3f;
-    constexpr float c_erff_r1_p2     = -2.67681349e-2f;
-    constexpr float c_erff_r1_p3     = 1.12819925e-1f;
-    constexpr float c_erff_r1_p4     = -3.76125336e-1f;
-    constexpr float c_erff_r1_p5     = 1.28379166e-1f;
-    constexpr float c_erff_threshold = 0.927734375f;
-
-    inline float erf(float v) {
-        float r, s, t, u;
-        t = std::fabs(v);
-        s = v * v;
-        if (t > c_erff_threshold) {
-            r = std::fma(c_erff_r0_p0, t, c_erff_r0_p1);
-            u = std::fma(c_erff_r0_p2, t, c_erff_r0_p3);
-            r = std::fma(r, s, u);
-            r = std::fma(r, t, c_erff_r0_p4);
-            r = std::fma(r, t, c_erff_r0_p5);
-            r = std::fma(r, t, c_erff_r0_p6);
-            r = std::fma(r, t, -t);
-            r = 1.0f - std::exp(r);
-            r = std::copysign(r , v);
-        } else {
-            r = c_erff_r1_p0;
-            r = std::fma(r, s, c_erff_r1_p1);
-            r = std::fma(r, s, c_erff_r1_p2);
-            r = std::fma(r, s, c_erff_r1_p3);
-            r = std::fma(r, s, c_erff_r1_p4);
-            r = std::fma(r, s, c_erff_r1_p5);
-            r = std::fma(r, v, v);
-        }
-        return r;
     }
 
     inline v_float32x4 v_erf(v_float32x4 v) {
@@ -952,10 +953,9 @@ namespace paddle {
 
         return v_select(v_lt(t, masks), r1, r0);
     };
-}
 #endif
+}
 
-#if CV_SIMD128
 namespace wiki {
     constexpr float c_erf_coef0 = 0.0000430638f;
     constexpr float c_erf_coef1 = 0.0002765672f;
@@ -979,6 +979,7 @@ namespace wiki {
         return sign * (1.f - d);
     }
 
+#if CV_SIMD128
     inline v_float32x4 v_erf(v_float32x4 v) {
         v_float32x4 coef0 = v_setall_f32(c_erf_coef0),
                     coef1 = v_setall_f32(c_erf_coef1),
@@ -1004,11 +1005,31 @@ namespace wiki {
         d = v_sub(ones, d);
         return v_xor(sign_mask, d);
     }
-}
 #endif
+}
+
+namespace pytorch {
+    /* Reference from PyTorch
+        https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/cpu/vec/vec512/vec512_float.h#L187-L218
+    */
+    constexpr float c_erf_coef0 = 0.3275911f;
+    constexpr float c_erf_coef1 = 1.061405429f;
+    constexpr float c_erf_coef2 = -1.453152027f;
+    constexpr float c_erf_coef3 = 1.421413741f;
+    constexpr float c_erf_coef4 = -0.284496736f;
+    constexpr float c_erf_coef5 = 0.254829592f;
+
+    inline float erf(float v) {
+        float sx = v >= 0 ? 1.f : -1.f;
+        float t = 1.f / fma(fabs(v), c_erf_coef0, 1.f);
+        float r = fma(c_erf_coef1, t, c_erf_coef2);
+        r = fma(r, t, c_erf_coef3);
+        r = fma(r, t, c_erf_coef4);
+        r = fma(r, t, c_erf_coef5);
+        return sx * (1.f - r * t * exp(-v * v));
+    }
 
 #if CV_SIMD128
-namespace pytorch {
     // TODO: This is taken from https://github.com/opencv/opencv/pull/24941.
     //       Remove this once the PR is merged.
     inline v_float32 v_exp(const v_float32 &x) {
@@ -1055,26 +1076,6 @@ namespace pytorch {
         return v_mul(_vexp_y, v_reinterpret_as_f32(_vexp_mm));
     }
 
-    /* Reference from PyTorch
-        https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/cpu/vec/vec512/vec512_float.h#L187-L218
-    */
-    constexpr float c_erf_coef0 = 0.3275911f;
-    constexpr float c_erf_coef1 = 1.061405429f;
-    constexpr float c_erf_coef2 = -1.453152027f;
-    constexpr float c_erf_coef3 = 1.421413741f;
-    constexpr float c_erf_coef4 = -0.284496736f;
-    constexpr float c_erf_coef5 = 0.254829592f;
-
-    inline float erf(float v) {
-        float sx = v >= 0 ? 1.f : -1.f;
-        float t = 1.f / fma(fabs(v), c_erf_coef0, 1.f);
-        float r = fma(c_erf_coef1, t, c_erf_coef2);
-        r = fma(r, t, c_erf_coef3);
-        r = fma(r, t, c_erf_coef4);
-        r = fma(r, t, c_erf_coef5);
-        return sx * (1.f - r * t * exp(-v * v));
-    }
-
     inline v_float32x4 v_erf(v_float32x4 v) {
         v_float32x4 coef0 = v_setall_f32(c_erf_coef0),
                     coef1 = v_setall_f32(c_erf_coef1),
@@ -1096,8 +1097,8 @@ namespace pytorch {
         r = v_sub(ones, r);
         return v_xor(sign_mask, r);
     }
-}
 #endif
+}
 
 struct GeluFunctor : public BaseFunctor {
     using Layer = GeluLayer;
