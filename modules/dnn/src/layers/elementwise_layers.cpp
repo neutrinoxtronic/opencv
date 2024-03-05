@@ -963,7 +963,7 @@ namespace wiki {
 */
     constexpr float c_erf_coef0 = 0.0000430638f;
     constexpr float c_erf_coef1 = 0.0002765672f;
-    constexpr float c_erf_coef2 = 0.0001520143;
+    constexpr float c_erf_coef2 = 0.0001520143f;
     constexpr float c_erf_coef3 = 0.0092705272f;
     constexpr float c_erf_coef4 = 0.0422820123f;
     constexpr float c_erf_coef5 = 0.0705230784f;
@@ -1109,7 +1109,7 @@ namespace pytorch {
         v_float32x4 neg_exp = v_xor(neg_zeros, exp);
         v_float32x4 res = v_mul(t, neg_exp);
         res = v_fma(r, res, ones);
-        return v_xor(sign_mask, r);
+        return v_xor(sign_mask, res);
     }
 #endif
 }
@@ -1145,18 +1145,18 @@ struct GeluFunctor : public BaseFunctor {
                             t3 = v_mul(reciprocal_sqrt2, x3);
 
                 // t = 1.0f + t
-                // t0 = v_add(one, paddle::v_erf(t0)),
-                // t1 = v_add(one, paddle::v_erf(t1)),
-                // t2 = v_add(one, paddle::v_erf(t2)),
+                // t0 = v_add(one, paddle::v_erf(t0));
+                // t1 = v_add(one, paddle::v_erf(t1));
+                // t2 = v_add(one, paddle::v_erf(t2));
                 // t3 = v_add(one, paddle::v_erf(t3));
-                // t0 = v_add(one, wiki::v_erf(t0)),
-                // t1 = v_add(one, wiki::v_erf(t1)),
-                // t2 = v_add(one, wiki::v_erf(t2)),
-                // t3 = v_add(one, wiki::v_erf(t3));
-                t0 = v_add(one, pytorch::v_erf(t0)),
-                t1 = v_add(one, pytorch::v_erf(t1)),
-                t2 = v_add(one, pytorch::v_erf(t2)),
-                t3 = v_add(one, pytorch::v_erf(t3));
+                t0 = v_add(one, wiki::v_erf(t0));
+                t1 = v_add(one, wiki::v_erf(t1));
+                t2 = v_add(one, wiki::v_erf(t2));
+                t3 = v_add(one, wiki::v_erf(t3));
+                // t0 = v_add(one, pytorch::v_erf(t0));
+                // t1 = v_add(one, pytorch::v_erf(t1));
+                // t2 = v_add(one, pytorch::v_erf(t2));
+                // t3 = v_add(one, pytorch::v_erf(t3));
 
                 // x = 0.5 * x
                 x0 = v_mul(half, x0);
@@ -1171,9 +1171,9 @@ struct GeluFunctor : public BaseFunctor {
                 x3 = v_mul(x3, t3);
 
                 v_store(dstptr + i, x0);
-                v_store(dstptr + i, x1);
-                v_store(dstptr + i, x2);
-                v_store(dstptr + i, x3);
+                v_store(dstptr + i + 4, x1);
+                v_store(dstptr + i + 8, x2);
+                v_store(dstptr + i + 12, x3);
             }
 #endif
             // 0.5f * x * (1.0f + erf(x * M_SQRT1_2));
@@ -1181,8 +1181,8 @@ struct GeluFunctor : public BaseFunctor {
             {
                 float x = srcptr[i];
                 // dstptr[i] = 0.5f * x * (1.0f + paddle::erf(x * M_SQRT1_2));
-                // dstptr[i] = 0.5f * x * (1.0f + wiki::erf(x * M_SQRT1_2));
-                dstptr[i] = 0.5f * x * (1.0f + pytorch::erf(x * M_SQRT1_2));
+                dstptr[i] = 0.5f * x * (1.0f + wiki::erf(x * M_SQRT1_2));
+                // dstptr[i] = 0.5f * x * (1.0f + pytorch::erf(x * M_SQRT1_2));
             }
         }
     }
