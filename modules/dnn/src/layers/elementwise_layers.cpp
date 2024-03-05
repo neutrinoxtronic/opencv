@@ -54,7 +54,6 @@
 #include <iostream>
 #include <limits>
 #include <cfenv>
-#include <cmath>
 
 #ifdef HAVE_OPENCL
 #include "opencl_kernels_dnn.hpp"
@@ -815,7 +814,7 @@ private:
 };
 
 #if CV_SIMD128
-namespace {
+namespace paddle {
     // TODO: This is taken from https://github.com/opencv/opencv/pull/24941.
     //       Remove this once the PR is merged.
     inline v_float32 v_exp(const v_float32 &x) {
@@ -880,33 +879,33 @@ namespace {
     constexpr float c_erff_r1_p5     = 1.28379166e-1f;
     constexpr float c_erff_threshold = 0.927734375f;
 
-    inline float erf_approximate(float v) {
+    inline float erf(float v) {
         float r, s, t, u;
-        t = std::fabsf(v);
+        t = std::fabs(v);
         s = v * v;
         if (t > c_erff_threshold) {
-            r = std::fmaf(c_erff_r0_p0, t, c_erff_r0_p1);
-            u = std::fmaf(c_erff_r0_p2, t, c_erff_r0_p3);
-            r = std::fmaf(r, s, u);
-            r = std::fmaf(r, t, c_erff_r0_p4);
-            r = std::fmaf(r, t, c_erff_r0_p5);
-            r = std::fmaf(r, t, c_erff_r0_p6);
-            r = std::fmaf(r, t, -t);
-            r = 1.0f - std::expf(r);
-            r = std::copysignf(r , v);
+            r = std::fma(c_erff_r0_p0, t, c_erff_r0_p1);
+            u = std::fma(c_erff_r0_p2, t, c_erff_r0_p3);
+            r = std::fma(r, s, u);
+            r = std::fma(r, t, c_erff_r0_p4);
+            r = std::fma(r, t, c_erff_r0_p5);
+            r = std::fma(r, t, c_erff_r0_p6);
+            r = std::fma(r, t, -t);
+            r = 1.0f - std::exp(r);
+            r = std::copysign(r , v);
         } else {
             r = c_erff_r1_p0;
-            r = std::fmaf(r, s, c_erff_r1_p1);
-            r = std::fmaf(r, s, c_erff_r1_p2);
-            r = std::fmaf(r, s, c_erff_r1_p3);
-            r = std::fmaf(r, s, c_erff_r1_p4);
-            r = std::fmaf(r, s, c_erff_r1_p5);
-            r = std::fmaf(r, v, v);
+            r = std::fma(r, s, c_erff_r1_p1);
+            r = std::fma(r, s, c_erff_r1_p2);
+            r = std::fma(r, s, c_erff_r1_p3);
+            r = std::fma(r, s, c_erff_r1_p4);
+            r = std::fma(r, s, c_erff_r1_p5);
+            r = std::fma(r, v, v);
         }
         return r;
     }
 
-    inline v_float32x4 v_erf_approximate(v_float32x4 v) {
+    inline v_float32x4 v_erf(v_float32x4 v) {
         v_float32x4 coef0 = v_setall_f32(c_erff_r0_p0);
         v_float32x4 coef1 = v_setall_f32(c_erff_r0_p1);
         v_float32x4 coef2 = v_setall_f32(c_erff_r0_p2);
@@ -956,6 +955,150 @@ namespace {
 }
 #endif
 
+#if CV_SIMD128
+namespace wiki {
+    constexpr float c_erf_coef0 = 0.0000430638f;
+    constexpr float c_erf_coef1 = 0.0002765672f;
+    constexpr float c_erf_coef2 = 0.0001520143;
+    constexpr float c_erf_coef3 = 0.0092705272f;
+    constexpr float c_erf_coef4 = 0.0422820123f;
+    constexpr float c_erf_coef5 = 0.0705230784f;
+
+    inline float erf(float v) {
+        float sign = v >= 0 ? 1.f : -1.f,
+              t = std::fabs(v);
+        float d = c_erf_coef0 * t + c_erf_coef1;
+        d = d * t + c_erf_coef2;
+        d = d * t + c_erf_coef3;
+        d = d * t + c_erf_coef4;
+        d = d * t + c_erf_coef5;
+        d = d * t + 1.f;
+        d = 1.f / d;
+        d *= d; d *= d;
+        d *= d; d *= d;
+        return sign * (1.f - d);
+    }
+
+    inline v_float32x4 v_erf(v_float32x4 v) {
+        v_float32x4 coef0 = v_setall_f32(c_erf_coef0),
+                    coef1 = v_setall_f32(c_erf_coef1),
+                    coef2 = v_setall_f32(c_erf_coef2),
+                    coef3 = v_setall_f32(c_erf_coef3),
+                    coef4 = v_setall_f32(c_erf_coef4),
+                    coef5 = v_setall_f32(c_erf_coef5);
+        v_float32x4 ones = v_setall_f32(1.0f),
+                    sign_mask = v_setall_f32(0x80000000),
+                    t = v_abs(v);
+
+        v_float32x4 d = v_fma(coef0, t, coef1);
+        d = v_fma(d, t, coef2);
+        d = v_fma(d, t, coef3);
+        d = v_fma(d, t, coef4);
+        d = v_fma(d, t, coef5);
+        d = v_fma(d, t, ones);
+        d = v_div(ones, d);
+        d = v_mul(d, d);    // d^2
+        d = v_mul(d, d);    // d^4
+        d = v_mul(d, d);    // d^8
+        d = v_mul(d, d);    // d^16
+        d = v_sub(ones, d);
+        return v_xor(sign_mask, d);
+    }
+}
+#endif
+
+#if CV_SIMD128
+namespace pytorch {
+    // TODO: This is taken from https://github.com/opencv/opencv/pull/24941.
+    //       Remove this once the PR is merged.
+    inline v_float32 v_exp(const v_float32 &x) {
+        const v_float32 _vexp_lo_f32 = vx_setall_f32(-88.3762626647949f);
+        const v_float32 _vexp_hi_f32 = vx_setall_f32(89.f);
+        const v_float32 _vexp_half_fp32 = vx_setall_f32(0.5f);
+        const v_float32 _vexp_one_fp32 = vx_setall_f32(1.f);
+        const v_float32 _vexp_LOG2EF_f32 = vx_setall_f32(1.44269504088896341f);
+        const v_float32 _vexp_C1_f32 = vx_setall_f32(-6.93359375E-1f);
+        const v_float32 _vexp_C2_f32 = vx_setall_f32(2.12194440E-4f);
+        const v_float32 _vexp_p0_f32 = vx_setall_f32(1.9875691500E-4f);
+        const v_float32 _vexp_p1_f32 = vx_setall_f32(1.3981999507E-3f);
+        const v_float32 _vexp_p2_f32 = vx_setall_f32(8.3334519073E-3f);
+        const v_float32 _vexp_p3_f32 = vx_setall_f32(4.1665795894E-2f);
+        const v_float32 _vexp_p4_f32 = vx_setall_f32(1.6666665459E-1f);
+        const v_float32 _vexp_p5_f32 = vx_setall_f32(5.0000001201E-1f);
+        const v_int32 _vexp_bias_s32 = vx_setall_s32(0x7f);
+
+        v_float32 _vexp_, _vexp_x, _vexp_y, _vexp_xx;
+        v_int32 _vexp_mm;
+
+        // compute exponential of x
+        _vexp_x = v_max(x, _vexp_lo_f32);
+        _vexp_x = v_min(_vexp_x, _vexp_hi_f32);
+
+        _vexp_ = v_fma(_vexp_x, _vexp_LOG2EF_f32, _vexp_half_fp32);
+        _vexp_mm = v_floor(_vexp_);
+        _vexp_ = v_cvt_f32(_vexp_mm);
+        _vexp_mm = v_add(_vexp_mm, _vexp_bias_s32);
+        _vexp_mm = v_shl(_vexp_mm, 23);
+
+        _vexp_x = v_fma(_vexp_, _vexp_C1_f32, _vexp_x);
+        _vexp_x = v_fma(_vexp_, _vexp_C2_f32, _vexp_x);
+        _vexp_xx = v_mul(_vexp_x, _vexp_x);
+
+        _vexp_y = v_fma(_vexp_x, _vexp_p0_f32, _vexp_p1_f32);
+        _vexp_y = v_fma(_vexp_y, _vexp_x, _vexp_p2_f32);
+        _vexp_y = v_fma(_vexp_y, _vexp_x, _vexp_p3_f32);
+        _vexp_y = v_fma(_vexp_y, _vexp_x, _vexp_p4_f32);
+        _vexp_y = v_fma(_vexp_y, _vexp_x, _vexp_p5_f32);
+
+        _vexp_y = v_fma(_vexp_y, _vexp_xx, _vexp_x);
+        _vexp_y = v_add(_vexp_y, _vexp_one_fp32);
+        return v_mul(_vexp_y, v_reinterpret_as_f32(_vexp_mm));
+    }
+
+    /* Reference from PyTorch
+        https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/cpu/vec/vec512/vec512_float.h#L187-L218
+    */
+    constexpr float c_erf_coef0 = 0.3275911f;
+    constexpr float c_erf_coef1 = 1.061405429f;
+    constexpr float c_erf_coef2 = -1.453152027f;
+    constexpr float c_erf_coef3 = 1.421413741f;
+    constexpr float c_erf_coef4 = -0.284496736f;
+    constexpr float c_erf_coef5 = 0.254829592f;
+
+    inline float erf(float v) {
+        float sx = v >= 0 ? 1.f : -1.f;
+        float t = 1.f / fma(fabs(v), c_erf_coef0, 1.f);
+        float r = fma(c_erf_coef1, t, c_erf_coef2);
+        r = fma(r, t, c_erf_coef3);
+        r = fma(r, t, c_erf_coef4);
+        r = fma(r, t, c_erf_coef5);
+        return sx * (1.f - r * t * exp(-v * v));
+    }
+
+    inline v_float32x4 v_erf(v_float32x4 v) {
+        v_float32x4 coef0 = v_setall_f32(c_erf_coef0),
+                    coef1 = v_setall_f32(c_erf_coef1),
+                    coef2 = v_setall_f32(c_erf_coef2),
+                    coef3 = v_setall_f32(c_erf_coef3),
+                    coef4 = v_setall_f32(c_erf_coef4),
+                    coef5 = v_setall_f32(c_erf_coef5);
+        v_float32x4 ones = v_setall_f32(1.0f),
+                    neg_ones = v_setall_f32(-1.0f),
+                    sign_mask = v_setall_f32(0x80000000),
+                    t = v_abs(v);
+        t = v_div(ones, v_fma(coef0, t, ones));
+        v_float32x4 r = v_fma(coef1, t, coef2);
+        r = v_fma(r, t, coef3);
+        r = v_fma(r, t, coef4);
+        r = v_fma(r, t, coef5);
+        v_float32x4 exp = v_exp(v_mul(v, v_mul(neg_ones, v)));
+        r = v_mul(r, v_mul(t, exp));
+        r = v_sub(ones, r);
+        return v_xor(sign_mask, r);
+    }
+}
+#endif
+
 struct GeluFunctor : public BaseFunctor {
     using Layer = GeluLayer;
 
@@ -987,10 +1130,18 @@ struct GeluFunctor : public BaseFunctor {
                             t3 = v_mul(reciprocal_sqrt2, x3);
 
                 // t = 1.0f + t
-                t0 = v_add(one, v_erf_approximate(t0)),
-                t1 = v_add(one, v_erf_approximate(t1)),
-                t2 = v_add(one, v_erf_approximate(t2)),
-                t3 = v_add(one, v_erf_approximate(t3));
+                // t0 = v_add(one, paddle::v_erf(t0)),
+                // t1 = v_add(one, paddle::v_erf(t1)),
+                // t2 = v_add(one, paddle::v_erf(t2)),
+                // t3 = v_add(one, paddle::v_erf(t3));
+                // t0 = v_add(one, wiki::v_erf(t0)),
+                // t1 = v_add(one, wiki::v_erf(t1)),
+                // t2 = v_add(one, wiki::v_erf(t2)),
+                // t3 = v_add(one, wiki::v_erf(t3));
+                t0 = v_add(one, pytorch::v_erf(t0)),
+                t1 = v_add(one, pytorch::v_erf(t1)),
+                t2 = v_add(one, pytorch::v_erf(t2)),
+                t3 = v_add(one, pytorch::v_erf(t3));
 
                 // x = 0.5 * x
                 x0 = v_mul(half, x0);
@@ -1014,7 +1165,9 @@ struct GeluFunctor : public BaseFunctor {
             for( ; i < len; i++ )
             {
                 float x = srcptr[i];
-                dstptr[i] = 0.5f * x * (1.0f + erf_approximate(x * M_SQRT1_2));
+                // dstptr[i] = 0.5f * x * (1.0f + paddle::erf(x * M_SQRT1_2));
+                // dstptr[i] = 0.5f * x * (1.0f + wiki::erf(x * M_SQRT1_2));
+                dstptr[i] = 0.5f * x * (1.0f + pytorch::erf(x * M_SQRT1_2));
             }
         }
     }
