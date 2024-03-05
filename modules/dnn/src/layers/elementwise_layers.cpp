@@ -54,6 +54,7 @@
 #include <iostream>
 #include <limits>
 #include <cfenv>
+#include <cmath>
 
 #ifdef HAVE_OPENCL
 #include "opencl_kernels_dnn.hpp"
