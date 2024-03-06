@@ -813,209 +813,7 @@ private:
     static const char* const ocl_kernel_name;
 };
 
-
-namespace paddle {
-    /* Reference from Paddle-Lite
-        https://github.com/PaddlePaddle/Paddle-Lite/blob/develop/lite/backends/arm/math/activation.cc#L1155
-    */
-    constexpr float c_erff_r0_p0     = -1.72853470e-5f;
-    constexpr float c_erff_r0_p1     = 3.83197126e-4f;
-    constexpr float c_erff_r0_p2     = -3.88396438e-3f;
-    constexpr float c_erff_r0_p3     = 2.42546219e-2f;
-    constexpr float c_erff_r0_p4     = -1.06777877e-1f;
-    constexpr float c_erff_r0_p5     = -6.34846687e-1f;
-    constexpr float c_erff_r0_p6     = -1.28717512e-1f;
-    constexpr float c_erff_r1_p0     = -5.96761703e-4f;
-    constexpr float c_erff_r1_p1     = 4.99119423e-3f;
-    constexpr float c_erff_r1_p2     = -2.67681349e-2f;
-    constexpr float c_erff_r1_p3     = 1.12819925e-1f;
-    constexpr float c_erff_r1_p4     = -3.76125336e-1f;
-    constexpr float c_erff_r1_p5     = 1.28379166e-1f;
-    constexpr float c_erff_threshold = 0.927734375f;
-
-    inline float erf(float v) {
-        float r, s, t, u;
-        t = std::fabs(v);
-        s = v * v;
-        if (t > c_erff_threshold) {
-            r = std::fma(c_erff_r0_p0, t, c_erff_r0_p1);
-            u = std::fma(c_erff_r0_p2, t, c_erff_r0_p3);
-            r = std::fma(r, s, u);
-            r = std::fma(r, t, c_erff_r0_p4);
-            r = std::fma(r, t, c_erff_r0_p5);
-            r = std::fma(r, t, c_erff_r0_p6);
-            r = std::fma(r, t, -t);
-            r = 1.0f - std::exp(r);
-            r = std::copysign(r , v);
-        } else {
-            r = c_erff_r1_p0;
-            r = std::fma(r, s, c_erff_r1_p1);
-            r = std::fma(r, s, c_erff_r1_p2);
-            r = std::fma(r, s, c_erff_r1_p3);
-            r = std::fma(r, s, c_erff_r1_p4);
-            r = std::fma(r, s, c_erff_r1_p5);
-            r = std::fma(r, v, v);
-        }
-        return r;
-    }
-
-#if CV_SIMD128
-    // TODO: This is taken from https://github.com/opencv/opencv/pull/24941.
-    //       Remove this once the PR is merged.
-    inline v_float32 v_exp(const v_float32 &x) {
-        const v_float32 _vexp_lo_f32 = vx_setall_f32(-88.3762626647949f);
-        const v_float32 _vexp_hi_f32 = vx_setall_f32(89.f);
-        const v_float32 _vexp_half_fp32 = vx_setall_f32(0.5f);
-        const v_float32 _vexp_one_fp32 = vx_setall_f32(1.f);
-        const v_float32 _vexp_LOG2EF_f32 = vx_setall_f32(1.44269504088896341f);
-        const v_float32 _vexp_C1_f32 = vx_setall_f32(-6.93359375E-1f);
-        const v_float32 _vexp_C2_f32 = vx_setall_f32(2.12194440E-4f);
-        const v_float32 _vexp_p0_f32 = vx_setall_f32(1.9875691500E-4f);
-        const v_float32 _vexp_p1_f32 = vx_setall_f32(1.3981999507E-3f);
-        const v_float32 _vexp_p2_f32 = vx_setall_f32(8.3334519073E-3f);
-        const v_float32 _vexp_p3_f32 = vx_setall_f32(4.1665795894E-2f);
-        const v_float32 _vexp_p4_f32 = vx_setall_f32(1.6666665459E-1f);
-        const v_float32 _vexp_p5_f32 = vx_setall_f32(5.0000001201E-1f);
-        const v_int32 _vexp_bias_s32 = vx_setall_s32(0x7f);
-
-        v_float32 _vexp_, _vexp_x, _vexp_y, _vexp_xx;
-        v_int32 _vexp_mm;
-
-        // compute exponential of x
-        _vexp_x = v_max(x, _vexp_lo_f32);
-        _vexp_x = v_min(_vexp_x, _vexp_hi_f32);
-
-        _vexp_ = v_fma(_vexp_x, _vexp_LOG2EF_f32, _vexp_half_fp32);
-        _vexp_mm = v_floor(_vexp_);
-        _vexp_ = v_cvt_f32(_vexp_mm);
-        _vexp_mm = v_add(_vexp_mm, _vexp_bias_s32);
-        _vexp_mm = v_shl(_vexp_mm, 23);
-
-        _vexp_x = v_fma(_vexp_, _vexp_C1_f32, _vexp_x);
-        _vexp_x = v_fma(_vexp_, _vexp_C2_f32, _vexp_x);
-        _vexp_xx = v_mul(_vexp_x, _vexp_x);
-
-        _vexp_y = v_fma(_vexp_x, _vexp_p0_f32, _vexp_p1_f32);
-        _vexp_y = v_fma(_vexp_y, _vexp_x, _vexp_p2_f32);
-        _vexp_y = v_fma(_vexp_y, _vexp_x, _vexp_p3_f32);
-        _vexp_y = v_fma(_vexp_y, _vexp_x, _vexp_p4_f32);
-        _vexp_y = v_fma(_vexp_y, _vexp_x, _vexp_p5_f32);
-
-        _vexp_y = v_fma(_vexp_y, _vexp_xx, _vexp_x);
-        _vexp_y = v_add(_vexp_y, _vexp_one_fp32);
-        return v_mul(_vexp_y, v_reinterpret_as_f32(_vexp_mm));
-    }
-
-    inline v_float32x4 v_erf(v_float32x4 v) {
-        v_float32x4 coef0 = v_setall_f32(c_erff_r0_p0);
-        v_float32x4 coef1 = v_setall_f32(c_erff_r0_p1);
-        v_float32x4 coef2 = v_setall_f32(c_erff_r0_p2);
-        v_float32x4 coef3 = v_setall_f32(c_erff_r0_p3);
-        v_float32x4 coef4 = v_setall_f32(c_erff_r0_p4);
-        v_float32x4 coef5 = v_setall_f32(c_erff_r0_p5);
-        v_float32x4 coef6 = v_setall_f32(c_erff_r0_p6);
-
-        v_float32x4 zeros = v_setzero_f32();
-        v_float32x4 ones = v_setall_f32(1.0f);
-        v_float32x4 masks = v_setall_f32(c_erff_threshold);
-        v_float32x4 r0, r1, s, t, u, t_;
-
-        // r0 (t > 0.927734375f)
-        t = v_abs(v);
-        s = v_mul(v, v);
-        t_ = v_sub(zeros, t);
-        r0 = v_fma(coef0, t, coef1);
-        u = v_fma(coef2, t, coef3);
-        r0 = v_fma(r0, s, u);
-        r0 = v_fma(r0, t, coef4);
-        r0 = v_fma(r0, t, coef5);
-        r0 = v_fma(r0, t, coef6);
-        r0 = v_fma(r0, t, t_);
-        r0 = v_sub(ones, v_exp(r0));
-
-        r0 = v_select(v_gt(v, zeros), r0, v_sub(zeros, r0));
-
-        // r1 (t <= 0.927734375f)
-        coef0 = v_setall_f32(c_erff_r1_p0);
-        coef1 = v_setall_f32(c_erff_r1_p1);
-        coef2 = v_setall_f32(c_erff_r1_p2);
-        coef3 = v_setall_f32(c_erff_r1_p3);
-        coef4 = v_setall_f32(c_erff_r1_p4);
-        coef5 = v_setall_f32(c_erff_r1_p5);
-
-        r1 = coef0;
-        r1 = v_fma(r1, s, coef1);
-        r1 = v_fma(r1, s, coef2);
-        r1 = v_fma(r1, s, coef3);
-        r1 = v_fma(r1, s, coef4);
-        r1 = v_fma(r1, s, coef5);
-        r1 = v_fma(r1, v, v);
-
-        return v_select(v_lt(t, masks), r1, r0);
-    };
-#endif
-}
-
-namespace wiki {
-/* Reference from wiki:
-    https://en.wikipedia.org/wiki/Error_function#Approximation_with_elementary_functions
-   Second of Abramowitz and Stegun approximation.
-*/
-    constexpr float c_erf_coef0 = 0.0000430638f;
-    constexpr float c_erf_coef1 = 0.0002765672f;
-    constexpr float c_erf_coef2 = 0.0001520143f;
-    constexpr float c_erf_coef3 = 0.0092705272f;
-    constexpr float c_erf_coef4 = 0.0422820123f;
-    constexpr float c_erf_coef5 = 0.0705230784f;
-
-    inline float erf(float v) {
-        float t = std::fabs(v);
-        float d = c_erf_coef0 * t + c_erf_coef1;
-        d = d * t + c_erf_coef2;
-        d = d * t + c_erf_coef3;
-        d = d * t + c_erf_coef4;
-        d = d * t + c_erf_coef5;
-        d = d * t + 1.f;
-        d = 1.f / d;
-        d *= d; d *= d;
-        d *= d; d *= d;
-        d = 1.f - d;
-        return std::copysign(d, v);
-    }
-
-#if CV_SIMD128
-    inline v_float32x4 v_erf(v_float32x4 v) {
-        v_float32x4 coef0 = v_setall_f32(c_erf_coef0),
-                    coef1 = v_setall_f32(c_erf_coef1),
-                    coef2 = v_setall_f32(c_erf_coef2),
-                    coef3 = v_setall_f32(c_erf_coef3),
-                    coef4 = v_setall_f32(c_erf_coef4),
-                    coef5 = v_setall_f32(c_erf_coef5);
-        v_float32x4 ones = v_setall_f32(1.0f),
-                    neg_zeros = v_setall_f32(-0.f),
-                    t = v_abs(v);
-
-        // sign(v)
-        v_float32x4 sign_mask = v_and(neg_zeros, v);
-
-        v_float32x4 d = v_fma(coef0, t, coef1);
-        d = v_fma(d, t, coef2);
-        d = v_fma(d, t, coef3);
-        d = v_fma(d, t, coef4);
-        d = v_fma(d, t, coef5);
-        d = v_fma(d, t, ones);
-        d = v_div(ones, d);
-        d = v_mul(d, d);    // d^2
-        d = v_mul(d, d);    // d^4
-        d = v_mul(d, d);    // d^8
-        d = v_mul(d, d);    // d^16
-        d = v_sub(ones, d);
-        return v_xor(sign_mask, d);
-    }
-#endif
-}
-
-namespace pytorch {
+namespace pytorch_math {
     /* Reference from PyTorch
         https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/cpu/vec/vec512/vec512_float.h#L187-L218
     */
@@ -1084,14 +882,14 @@ namespace pytorch {
     }
 
     inline v_float32x4 v_erf(v_float32x4 v) {
-        v_float32x4 coef0 = v_setall_f32(c_erf_coef0),
-                    coef1 = v_setall_f32(c_erf_coef1),
-                    coef2 = v_setall_f32(c_erf_coef2),
-                    coef3 = v_setall_f32(c_erf_coef3),
-                    coef4 = v_setall_f32(c_erf_coef4),
-                    coef5 = v_setall_f32(c_erf_coef5);
-        v_float32x4 ones = v_setall_f32(1.0f),
-                    neg_zeros = v_setall_f32(-0.f),
+        v_float32x4 coef0 = vx_setall_f32(c_erf_coef0),
+                    coef1 = vx_setall_f32(c_erf_coef1),
+                    coef2 = vx_setall_f32(c_erf_coef2),
+                    coef3 = vx_setall_f32(c_erf_coef3),
+                    coef4 = vx_setall_f32(c_erf_coef4),
+                    coef5 = vx_setall_f32(c_erf_coef5);
+        v_float32x4 ones = vx_setall_f32(1.0f),
+                    neg_zeros = vx_setall_f32(-0.f),
                     t = v_abs(v);
         // sign(v)
         v_float32x4 sign_mask = v_and(neg_zeros, v);
@@ -1145,18 +943,10 @@ struct GeluFunctor : public BaseFunctor {
                             t3 = v_mul(reciprocal_sqrt2, x3);
 
                 // t = 1.0f + t
-                // t0 = v_add(one, paddle::v_erf(t0));
-                // t1 = v_add(one, paddle::v_erf(t1));
-                // t2 = v_add(one, paddle::v_erf(t2));
-                // t3 = v_add(one, paddle::v_erf(t3));
-                t0 = v_add(one, wiki::v_erf(t0));
-                t1 = v_add(one, wiki::v_erf(t1));
-                t2 = v_add(one, wiki::v_erf(t2));
-                t3 = v_add(one, wiki::v_erf(t3));
-                // t0 = v_add(one, pytorch::v_erf(t0));
-                // t1 = v_add(one, pytorch::v_erf(t1));
-                // t2 = v_add(one, pytorch::v_erf(t2));
-                // t3 = v_add(one, pytorch::v_erf(t3));
+                t0 = v_add(one, pytorch_math::v_erf(t0));
+                t1 = v_add(one, pytorch_math::v_erf(t1));
+                t2 = v_add(one, pytorch_math::v_erf(t2));
+                t3 = v_add(one, pytorch_math::v_erf(t3));
 
                 // x = 0.5 * x
                 x0 = v_mul(half, x0);
@@ -1180,9 +970,7 @@ struct GeluFunctor : public BaseFunctor {
             for( ; i < len; i++ )
             {
                 float x = srcptr[i];
-                // dstptr[i] = 0.5f * x * (1.0f + paddle::erf(x * M_SQRT1_2));
-                dstptr[i] = 0.5f * x * (1.0f + wiki::erf(x * M_SQRT1_2));
-                // dstptr[i] = 0.5f * x * (1.0f + pytorch::erf(x * M_SQRT1_2));
+                dstptr[i] = 0.5f * x * (1.0f + pytorch_math::erf(x * M_SQRT1_2));
             }
         }
     }
