@@ -834,7 +834,7 @@ namespace pytorch_math {
         return std::copysign(r, v);;
     }
 
-#if CV_SIMD128
+#if (CV_SIMD || CV_SIMD_SCALABLE)
     // TODO: This is taken from https://github.com/opencv/opencv/pull/24941.
     //       Remove this once the PR is merged.
     inline v_float32 v_exp(const v_float32 &x) {
@@ -881,31 +881,31 @@ namespace pytorch_math {
         return v_mul(_vexp_y, v_reinterpret_as_f32(_vexp_mm));
     }
 
-    inline v_float32x4 v_erf(v_float32x4 v) {
-        v_float32x4 coef0 = vx_setall_f32(c_erf_coef0),
-                    coef1 = vx_setall_f32(c_erf_coef1),
-                    coef2 = vx_setall_f32(c_erf_coef2),
-                    coef3 = vx_setall_f32(c_erf_coef3),
-                    coef4 = vx_setall_f32(c_erf_coef4),
-                    coef5 = vx_setall_f32(c_erf_coef5);
-        v_float32x4 ones = vx_setall_f32(1.0f),
-                    neg_zeros = vx_setall_f32(-0.f),
-                    t = v_abs(v);
+    inline v_float32 v_erf(v_float32 v) {
+        v_float32 coef0 = vx_setall_f32(c_erf_coef0),
+                  coef1 = vx_setall_f32(c_erf_coef1),
+                  coef2 = vx_setall_f32(c_erf_coef2),
+                  coef3 = vx_setall_f32(c_erf_coef3),
+                  coef4 = vx_setall_f32(c_erf_coef4),
+                  coef5 = vx_setall_f32(c_erf_coef5);
+        v_float32 ones = vx_setall_f32(1.0f),
+                  neg_zeros = vx_setall_f32(-0.f),
+                  t = v_abs(v);
         // sign(v)
-        v_float32x4 sign_mask = v_and(neg_zeros, v);
+        v_float32 sign_mask = v_and(neg_zeros, v);
 
         t = v_div(ones, v_fma(coef0, t, ones));
-        v_float32x4 r = v_fma(coef1, t, coef2);
+        v_float32 r = v_fma(coef1, t, coef2);
         r = v_fma(r, t, coef3);
         r = v_fma(r, t, coef4);
         r = v_fma(r, t, coef5);
         // - v * v
-        v_float32x4 pow_2 = v_mul(v, v);
-        v_float32x4 neg_pow_2 = v_xor(neg_zeros, pow_2);
+        v_float32 pow_2 = v_mul(v, v);
+        v_float32 neg_pow_2 = v_xor(neg_zeros, pow_2);
         // - exp(- v * v)
-        v_float32x4 exp = v_exp(neg_pow_2);
-        v_float32x4 neg_exp = v_xor(neg_zeros, exp);
-        v_float32x4 res = v_mul(t, neg_exp);
+        v_float32 exp = v_exp(neg_pow_2);
+        v_float32 neg_exp = v_xor(neg_zeros, exp);
+        v_float32 res = v_mul(t, neg_exp);
         res = v_fma(r, res, ones);
         return v_xor(sign_mask, res);
     }
@@ -914,8 +914,15 @@ namespace pytorch_math {
 
 struct GeluFunctor : public BaseFunctor {
     using Layer = GeluLayer;
+    int vlanes;
 
-    explicit GeluFunctor() {}
+    explicit GeluFunctor() {
+#if (CV_SIMD || CV_SIMD_SCALABLE)
+    vlanes = VTraits<v_float32>::vlanes();
+#else
+    vlanes = 1;
+#endif
+    }
 
     bool supportBackend(int backendId, int) {
         return backendId == DNN_BACKEND_OPENCV || backendId == DNN_BACKEND_CUDA;
@@ -925,22 +932,22 @@ struct GeluFunctor : public BaseFunctor {
         CV_UNUSED(stripeStart);
         for (int cn = cn0; cn < cn1; cn++, srcptr += planeSize, dstptr += planeSize) {
             int i = 0;
-#if CV_SIMD128
+#if (CV_SIMD || CV_SIMD_SCALABLE)
             // 0.5f * x * (1.0f + erf(x * M_SQRT1_2));
-            v_float32x4 half = v_setall_f32(0.5f),
-                        one = v_setall_f32(1.0f),
-                        reciprocal_sqrt2 = v_setall_f32(M_SQRT1_2);
-            for (; i <= len - 16; i += 16) {
-                v_float32x4 x0 = v_load(srcptr + i),
-                            x1 = v_load(srcptr + i + 4),
-                            x2 = v_load(srcptr + i + 8),
-                            x3 = v_load(srcptr + i + 12);
+            v_float32 half = vx_setall_f32(0.5f),
+                      one = vx_setall_f32(1.0f),
+                      reciprocal_sqrt2 = vx_setall_f32(M_SQRT1_2);
+            for (; i <= len - vlanes * 4; i += vlanes * 4) {
+                v_float32 x0 = vx_load(srcptr + i),
+                          x1 = vx_load(srcptr + i + vlanes),
+                          x2 = vx_load(srcptr + i + 2 * vlanes),
+                          x3 = vx_load(srcptr + i + 3 * vlanes);
 
                 // t = x * M_SQRT1_2
-                v_float32x4 t0 = v_mul(reciprocal_sqrt2, x0),
-                            t1 = v_mul(reciprocal_sqrt2, x1),
-                            t2 = v_mul(reciprocal_sqrt2, x2),
-                            t3 = v_mul(reciprocal_sqrt2, x3);
+                v_float32 t0 = v_mul(reciprocal_sqrt2, x0),
+                          t1 = v_mul(reciprocal_sqrt2, x1),
+                          t2 = v_mul(reciprocal_sqrt2, x2),
+                          t3 = v_mul(reciprocal_sqrt2, x3);
 
                 // t = 1.0f + t
                 t0 = v_add(one, pytorch_math::v_erf(t0));
@@ -960,10 +967,10 @@ struct GeluFunctor : public BaseFunctor {
                 x2 = v_mul(x2, t2);
                 x3 = v_mul(x3, t3);
 
-                v_store(dstptr + i, x0);
-                v_store(dstptr + i + 4, x1);
-                v_store(dstptr + i + 8, x2);
-                v_store(dstptr + i + 12, x3);
+                vx_store(dstptr + i, x0);
+                vx_store(dstptr + i + vlanes, x1);
+                vx_store(dstptr + i + 2 * vlanes, x2);
+                vx_store(dstptr + i + 3 * vlanes, x3);
             }
 #endif
             // 0.5f * x * (1.0f + erf(x * M_SQRT1_2));
