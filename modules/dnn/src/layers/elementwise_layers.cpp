@@ -813,9 +813,9 @@ private:
     static const char* const ocl_kernel_name;
 };
 
-namespace pytorch_math {
+namespace {
     /* Reference from PyTorch
-        https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/cpu/vec/vec512/vec512_float.h#L187-L218
+        https://github.com/pytorch/pytorch/blob/9c50ecc84b9a6e699a7f058891b889aafbf976c7/aten/src/ATen/cpu/vec/vec512/vec512_float.h#L189-L220
     */
     constexpr float c_erf_coef0 = 0.3275911f;
     constexpr float c_erf_coef1 = 1.061405429f;
@@ -824,7 +824,7 @@ namespace pytorch_math {
     constexpr float c_erf_coef4 = -0.284496736f;
     constexpr float c_erf_coef5 = 0.254829592f;
 
-    inline float erf(float v) {
+    inline float erf_approx(float v) {
         float t = 1.f / fma(fabs(v), c_erf_coef0, 1.f);
         float r = fma(c_erf_coef1, t, c_erf_coef2);
         r = fma(r, t, c_erf_coef3);
@@ -881,7 +881,7 @@ namespace pytorch_math {
         return v_mul(_vexp_y, v_reinterpret_as_f32(_vexp_mm));
     }
 
-    inline v_float32 v_erf(v_float32 v) {
+    inline v_float32 v_erf_approx(v_float32 v) {
         v_float32 coef0 = vx_setall_f32(c_erf_coef0),
                   coef1 = vx_setall_f32(c_erf_coef1),
                   coef2 = vx_setall_f32(c_erf_coef2),
@@ -937,47 +937,35 @@ struct GeluFunctor : public BaseFunctor {
             v_float32 half = vx_setall_f32(0.5f),
                       one = vx_setall_f32(1.0f),
                       reciprocal_sqrt2 = vx_setall_f32(M_SQRT1_2);
-            for (; i <= len - vlanes * 4; i += vlanes * 4) {
+            for (; i <= len - vlanes * 2; i += vlanes * 2) {
                 v_float32 x0 = vx_load(srcptr + i),
-                          x1 = vx_load(srcptr + i + vlanes),
-                          x2 = vx_load(srcptr + i + 2 * vlanes),
-                          x3 = vx_load(srcptr + i + 3 * vlanes);
+                          x1 = vx_load(srcptr + i + vlanes);
 
                 // t = x * M_SQRT1_2
                 v_float32 t0 = v_mul(reciprocal_sqrt2, x0),
-                          t1 = v_mul(reciprocal_sqrt2, x1),
-                          t2 = v_mul(reciprocal_sqrt2, x2),
-                          t3 = v_mul(reciprocal_sqrt2, x3);
+                          t1 = v_mul(reciprocal_sqrt2, x1);
 
                 // t = 1.0f + t
-                t0 = v_add(one, pytorch_math::v_erf(t0));
-                t1 = v_add(one, pytorch_math::v_erf(t1));
-                t2 = v_add(one, pytorch_math::v_erf(t2));
-                t3 = v_add(one, pytorch_math::v_erf(t3));
+                t0 = v_add(one, v_erf_approx(t0));
+                t1 = v_add(one, v_erf_approx(t1));
 
                 // x = 0.5 * x
                 x0 = v_mul(half, x0);
                 x1 = v_mul(half, x1);
-                x2 = v_mul(half, x2);
-                x3 = v_mul(half, x3);
 
                 // x = x * t
                 x0 = v_mul(x0, t0);
                 x1 = v_mul(x1, t1);
-                x2 = v_mul(x2, t2);
-                x3 = v_mul(x3, t3);
 
                 vx_store(dstptr + i, x0);
                 vx_store(dstptr + i + vlanes, x1);
-                vx_store(dstptr + i + 2 * vlanes, x2);
-                vx_store(dstptr + i + 3 * vlanes, x3);
             }
 #endif
             // 0.5f * x * (1.0f + erf(x * M_SQRT1_2));
             for( ; i < len; i++ )
             {
                 float x = srcptr[i];
-                dstptr[i] = 0.5f * x * (1.0f + pytorch_math::erf(x * M_SQRT1_2));
+                dstptr[i] = 0.5f * x * (1.0f + erf_approx(x * M_SQRT1_2));
             }
         }
     }
