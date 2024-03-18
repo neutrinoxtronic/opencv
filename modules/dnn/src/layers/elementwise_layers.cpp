@@ -825,13 +825,13 @@ namespace {
     constexpr float c_erf_coef5 = 0.254829592f;
 
     inline float erf_approx(float v) {
-        float t = 1.f / fma(fabs(v), c_erf_coef0, 1.f);
-        float r = fma(c_erf_coef1, t, c_erf_coef2);
-        r = fma(r, t, c_erf_coef3);
-        r = fma(r, t, c_erf_coef4);
-        r = fma(r, t, c_erf_coef5);
-        r = 1.f - r * t * exp(-v * v);
-        return std::copysign(r, v);;
+        float t = 1.f / fmaf(fabsf(v), c_erf_coef0, 1.f);
+        float r = fmaf(c_erf_coef1, t, c_erf_coef2);
+        r = fmaf(r, t, c_erf_coef3);
+        r = fmaf(r, t, c_erf_coef4);
+        r = fmaf(r, t, c_erf_coef5);
+        r = 1.f - r * t * expf(-v * v);
+        return std::copysignf(r, v);;
     }
 
 #if (CV_SIMD || CV_SIMD_SCALABLE)
