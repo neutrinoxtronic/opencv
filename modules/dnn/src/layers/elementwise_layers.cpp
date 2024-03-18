@@ -831,7 +831,7 @@ namespace {
         r = fmaf(r, t, c_erf_coef4);
         r = fmaf(r, t, c_erf_coef5);
         r = 1.f - r * t * expf(-v * v);
-        return std::copysignf(r, v);;
+        return std::copysignf(r, v);
     }
 
 #if (CV_SIMD || CV_SIMD_SCALABLE)
@@ -938,6 +938,12 @@ struct GeluFunctor : public BaseFunctor {
                       one = vx_setall_f32(1.0f),
                       reciprocal_sqrt2 = vx_setall_f32(M_SQRT1_2);
             for (; i <= len - vlanes; i += vlanes) {
+                if (i + vlanes > len) {
+                    if (i == 0 || i == len) {
+                        break;
+                    }
+                    i = len - vlanes;
+                }
                 v_float32 x0 = vx_load(srcptr + i);
 
                 // t = x * M_SQRT1_2
