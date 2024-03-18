@@ -937,28 +937,22 @@ struct GeluFunctor : public BaseFunctor {
             v_float32 half = vx_setall_f32(0.5f),
                       one = vx_setall_f32(1.0f),
                       reciprocal_sqrt2 = vx_setall_f32(M_SQRT1_2);
-            for (; i <= len - vlanes * 2; i += vlanes * 2) {
-                v_float32 x0 = vx_load(srcptr + i),
-                          x1 = vx_load(srcptr + i + vlanes);
+            for (; i <= len - vlanes; i += vlanes) {
+                v_float32 x0 = vx_load(srcptr + i);
 
                 // t = x * M_SQRT1_2
-                v_float32 t0 = v_mul(reciprocal_sqrt2, x0),
-                          t1 = v_mul(reciprocal_sqrt2, x1);
+                v_float32 t0 = v_mul(reciprocal_sqrt2, x0);
 
                 // t = 1.0f + t
                 t0 = v_add(one, v_erf_approx(t0));
-                t1 = v_add(one, v_erf_approx(t1));
 
                 // x = 0.5 * x
                 x0 = v_mul(half, x0);
-                x1 = v_mul(half, x1);
 
                 // x = x * t
                 x0 = v_mul(x0, t0);
-                x1 = v_mul(x1, t1);
 
                 vx_store(dstptr + i, x0);
-                vx_store(dstptr + i + vlanes, x1);
             }
 #endif
             // 0.5f * x * (1.0f + erf(x * M_SQRT1_2));
