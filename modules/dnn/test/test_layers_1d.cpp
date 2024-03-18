@@ -567,6 +567,34 @@ INSTANTIATE_TEST_CASE_P(/*nothing*/, Layer_Slice_Test,
                 std::vector<int>({1, 4})
 ));
 
+
+TEST(Layer_Tile_Test, Accuracy){
+
+    std::vector<int> input_shape = {0};
+    std::vector<int> repeats = {2};
+
+    LayerParams lp;
+    lp.type = "Tile";
+    lp.name = "TileLayer";
+    lp.set("repeats", DictValue::arrayInt(repeats.data(), repeats.size()));
+    Ptr<TileLayer> layer = TileLayer::create(lp);
+
+    std::vector<int> output_shape = {1};
+
+    cv::Mat input = cv::Mat(0, input_shape.data(), CV_32F, 1.0);
+    cv::Mat output_ref = cv::Mat(output_shape, CV_32F, 1.0);
+
+    std::vector<Mat> inputs{input};
+    std::vector<Mat> outputs;
+
+    runLayer(layer, inputs, outputs);
+
+    std::cout << "output shape: " << shape(outputs[0]) << std::endl;
+    std::cout << "output: " << outputs[0] << std::endl;
+
+}
+
+
 typedef testing::TestWithParam<tuple<std::vector<int>>> Layer_FullyConnected_Test;
 TEST_P(Layer_FullyConnected_Test, Accuracy_01D)
 {
