@@ -77,10 +77,10 @@ std::string genPreprocArguments(const std::string& modelName, const std::string&
 {
     return genArgument("model", "Path to a binary file of model contains trained weights. "
                                 "It could be a file with extensions .caffemodel (Caffe), "
-                                ".pb (TensorFlow), .weights (Darknet), .bin (OpenVINO).",
+                                ".pb (TensorFlow), .bin (OpenVINO).",
                        modelName, zooFile, 'm') +
            genArgument("config", "Path to a text file of model contains network configuration. "
-                                 "It could be a file with extensions .prototxt (Caffe), .pbtxt (TensorFlow), .cfg (Darknet), .xml (OpenVINO).",
+                                 "It could be a file with extensions .prototxt (Caffe), .pbtxt (TensorFlow), .xml (OpenVINO).",
                        modelName, zooFile, 'c') +
            genArgument("mean", "Preprocess input image by subtracting mean values. Mean values should be in BGR order and delimited by spaces.",
                        modelName, zooFile) +
@@ -91,5 +91,7 @@ std::string genPreprocArguments(const std::string& modelName, const std::string&
            genArgument("height", "Preprocess input image by resizing to a specific height.",
                        modelName, zooFile, ' ', "-1") +
            genArgument("rgb", "Indicate that model works with RGB input images instead BGR ones.",
+                       modelName, zooFile) +
+           genArgument("postprocessing", "Postprocessing method of Yolo model.",
                        modelName, zooFile);
 }

@@ -284,7 +284,8 @@ TEST_P(Test_Model, Classify)
     testClassifyModel(weights_file, config_file, img_path, ref, norm, size);
 }
 
-
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25200
+#if 0
 TEST_P(Test_Model, DetectRegion)
 {
     applyTestTag(
@@ -407,6 +408,7 @@ TEST_P(Test_Model, DetectRegionWithNmsAcrossClasses)
         Scalar(), scale, swapRB, crop,
         nmsAcrossClasses);
 }
+#endif
 
 TEST_P(Test_Model, DetectionOutput)
 {
