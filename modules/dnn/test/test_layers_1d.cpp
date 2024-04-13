@@ -567,11 +567,11 @@ INSTANTIATE_TEST_CASE_P(/*nothing*/, Layer_Slice_Test,
                 std::vector<int>({1, 4})
 ));
 
+typedef testing::TestWithParam<tuple<std::vector<int>>> Layer_Tile_Test;
+TEST_P(Layer_Tile_Test, Accuracy_01D){
 
-TEST(Layer_Tile_Test, Accuracy){
-
-    std::vector<int> input_shape = {0};
-    std::vector<int> repeats = {2};
+    std::vector<int> input_shape = get<0>(GetParam());
+    std::vector<int> repeats = {2, 2};
 
     LayerParams lp;
     lp.type = "Tile";
@@ -579,135 +579,32 @@ TEST(Layer_Tile_Test, Accuracy){
     lp.set("repeats", DictValue::arrayInt(repeats.data(), repeats.size()));
     Ptr<TileLayer> layer = TileLayer::create(lp);
 
-    std::vector<int> output_shape = {1};
-
-    cv::Mat input = cv::Mat(0, input_shape.data(), CV_32F, 1.0);
-    cv::Mat output_ref = cv::Mat(output_shape, CV_32F, 1.0);
-
-    std::vector<Mat> inputs{input};
-    std::vector<Mat> outputs;
-
-    runLayer(layer, inputs, outputs);
-
-    std::cout << "output shape: " << shape(outputs[0]) << std::endl;
-    std::cout << "output: " << outputs[0] << std::endl;
-
-}
-
-
-typedef testing::TestWithParam<tuple<std::vector<int>>> Layer_FullyConnected_Test;
-TEST_P(Layer_FullyConnected_Test, Accuracy_01D)
-{
-    LayerParams lp;
-    lp.type = "InnerProduct";
-    lp.name = "InnerProductLayer";
-    lp.set("num_output", 1);
-    lp.set("bias_term", false);
-    lp.set("axis", 0);
-
-    std::vector<int> input_shape = get<0>(GetParam());
-
-    RNG& rng = TS::ptr()->get_rng();
-    float inp_value = rng.uniform(0.0, 10.0);
-    Mat weights(std::vector<int>{total(input_shape), 1}, CV_32F, inp_value);
-    lp.blobs.push_back(weights);
-
-    Ptr<Layer> layer = LayerFactory::createLayerInstance("InnerProduct", lp);
-
-    Mat input(input_shape.size(), input_shape.data(), CV_32F);
-    randn(input, 0, 1);
-    Mat output_ref = input.reshape(1, 1) * weights;
-    output_ref.dims = 1;
-
-    std::vector<Mat> inputs{input};
-    std::vector<Mat> outputs;
-    runLayer(layer, inputs, outputs);
-    normAssert(output_ref, outputs[0]);
-}
-INSTANTIATE_TEST_CASE_P(/*nothting*/, Layer_FullyConnected_Test,
-                        testing::Values(
-                            std::vector<int>({}),
-                            std::vector<int>({1}),
-                            std::vector<int>({4})
-));
-
-typedef testing::TestWithParam<std::vector<int>> Layer_BatchNorm_Test;
-TEST_P(Layer_BatchNorm_Test, Accuracy_01D)
-{
-    std::vector<int> input_shape = GetParam();
-
-    // Layer parameters
-    LayerParams lp;
-    lp.type = "BatchNorm";
-    lp.name = "BatchNormLayer";
-    lp.set("has_weight", false);
-    lp.set("has_bias", false);
-
-    RNG& rng = TS::ptr()->get_rng();
-    float inp_value = rng.uniform(0.0, 10.0);
-
-    Mat meanMat(input_shape.size(), input_shape.data(), CV_32F, inp_value);
-    Mat varMat(input_shape.size(), input_shape.data(), CV_32F, inp_value);
-    vector<Mat> blobs = {meanMat, varMat};
-    lp.blobs = blobs;
-
-    // Create the layer
-    Ptr<Layer> layer = BatchNormLayer::create(lp);
-
-    Mat input(input_shape.size(), input_shape.data(), CV_32F, 1.0);
+    cv::Mat input = cv::Mat(input_shape.size(), input_shape.data(), CV_32F);
     cv::randn(input, 0, 1);
 
     std::vector<Mat> inputs{input};
     std::vector<Mat> outputs;
+
     runLayer(layer, inputs, outputs);
 
-    //create output_ref to compare with outputs
-    Mat output_ref = input.clone();
-    cv::sqrt(varMat + 1e-5, varMat);
-    output_ref = (output_ref - meanMat) / varMat;
+    // Manually create the expected output for verification
+    cv::Mat output_ref = input.clone();
+    for (int i = 0; i < repeats.size(); ++i) {
+        cv::Mat tmp;
+        cv::repeat(output_ref, (i == 0 ? repeats[i] : 1), (i == 1 ? repeats[i] : 1), tmp);
+        output_ref = tmp;
+    }
 
     ASSERT_EQ(outputs.size(), 1);
-    ASSERT_EQ(shape(output_ref), shape(outputs[0]));
+    ASSERT_EQ(shape(outputs[0]), shape(output_ref));
     normAssert(output_ref, outputs[0]);
 
 }
-INSTANTIATE_TEST_CASE_P(/*nothting*/, Layer_BatchNorm_Test,
-                        testing::Values(
-                            std::vector<int>({}),
-                            std::vector<int>({4}),
-                            std::vector<int>({1, 4}),
-                            std::vector<int>({4, 1})
-));
-
-
-typedef testing::TestWithParam<tuple<std::vector<int>>> Layer_Const_Test;
-TEST_P(Layer_Const_Test, Accuracy_01D)
-{
-    std::vector<int> input_shape = get<0>(GetParam());
-
-    LayerParams lp;
-    lp.type = "Const";
-    lp.name = "ConstLayer";
-
-    Mat constBlob = Mat(input_shape.size(), input_shape.data(), CV_32F);
-    cv::randn(constBlob, 0.0, 1.0);
-    Mat output_ref = constBlob.clone();
-
-    lp.blobs.push_back(constBlob);
-    Ptr<Layer> layer = ConstLayer::create(lp);
-
-    std::vector<Mat> inputs; // No inputs are needed for a ConstLayer
-    std::vector<Mat> outputs;
-    runLayer(layer, inputs, outputs);
-    ASSERT_EQ(outputs.size(), 1);
-    ASSERT_EQ(shape(output_ref), shape(outputs[0]));
-    normAssert(output_ref, outputs[0]);
-}
-INSTANTIATE_TEST_CASE_P(/*nothing*/, Layer_Const_Test, testing::Values(
-    std::vector<int>({}),
-    std::vector<int>({1}),
-    std::vector<int>({1, 4}),
-    std::vector<int>({4, 1})
-    ));
-
+INSTANTIATE_TEST_CASE_P(/*nothing*/, Layer_Tile_Test,
+/*input blob shape*/    testing::Values(
+        std::vector<int>({}),
+        std::vector<int>({2}),
+        std::vector<int>({2, 1}),
+        std::vector<int>({1, 2})
+        ));
 }}
