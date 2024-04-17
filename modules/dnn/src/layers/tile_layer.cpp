@@ -42,9 +42,8 @@ public:
         CV_CheckEQ(inputs.size(), 1ull, "Tile: one input is expected");
 
         // repeats must have the same length as input's dimension number
-        // FIXIT: it breaks when the input is 1d tensor (represented as 2d mat with size=2 in opencv dnn)
-        // CV_CheckEQ(inputs[0].size(), repeats.size(), "Tile: repeats must be a 1D tensor of the same length as input's dimension number");
         if (inputs[0].size() > 1) {
+            CV_CheckEQ(inputs[0].size(), repeats.size(), "Tile: repeats must be a 1D tensor of the same length as input's dimension number");
             outputs.assign(1, inputs[0]);
             for (int i = 0; i < repeats.size(); i++)
             {
