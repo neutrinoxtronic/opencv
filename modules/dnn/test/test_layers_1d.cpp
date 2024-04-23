@@ -567,10 +567,10 @@ INSTANTIATE_TEST_CASE_P(/*nothing*/, Layer_Slice_Test,
                 std::vector<int>({1, 4})
 ));
 
-typedef testing::TestWithParam<tuple<std::vector<int>>> Layer_Tile_Test;
+typedef testing::TestWithParam<std::vector<int>> Layer_Tile_Test;
 TEST_P(Layer_Tile_Test, Accuracy_01D){
 
-    std::vector<int> input_shape = get<0>(GetParam());
+    std::vector<int> input_shape = GetParam();
     std::vector<int> repeats = {2, 2};
 
     LayerParams lp;
