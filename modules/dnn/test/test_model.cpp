@@ -275,8 +275,8 @@ TEST_P(Test_Model, Classify)
     std::pair<int, float> ref(652, 0.641789);
 
     std::string img_path = _tf("grace_hopper_227.png");
-    std::string config_file = _tf("bvlc_alexnet.prototxt");
-    std::string weights_file = _tf("bvlc_alexnet.caffemodel", false);
+    std::string config_file = _tf("bvlc_alexnet.onnx");
+    std::string weights_file = "";
 
     Size size{227, 227};
     float norm = 1e-4;
@@ -408,6 +408,8 @@ TEST_P(Test_Model, DetectRegionWithNmsAcrossClasses)
         nmsAcrossClasses);
 }
 
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(Test_Model, DetectionOutput)
 {
     applyTestTag(CV_TEST_TAG_DEBUG_VERYLONG);
@@ -468,8 +470,10 @@ TEST_P(Test_Model, DetectionOutput)
     testDetectModel(weights_file, config_file, img_path, refClassIds, refConfidences, refBoxes,
                     scoreDiff, iouDiff, confThreshold, nmsThreshold, size, mean);
 }
+#endif
 
-
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(Test_Model, DetectionMobilenetSSD)
 {
     Mat ref = blobFromNPY(_tf("mobilenet_ssd_caffe_out.npy"));
@@ -526,6 +530,7 @@ TEST_P(Test_Model, DetectionMobilenetSSD)
     testDetectModel(weights_file, config_file, img_path, refClassIds, refConfidences, refBoxes,
                     scoreDiff, iouDiff, confThreshold, nmsThreshold, size, mean, scale);
 }
+#endif
 
 TEST_P(Test_Model, Keypoints_pose)
 {
@@ -594,6 +599,8 @@ TEST_P(Test_Model, Keypoints_face)
     testKeypointsModel(weights, "", inp, exp, norm, size, mean, scale, swapRB);
 }
 
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(Test_Model, Detection_normalized)
 {
     std::string img_path = _tf("grace_hopper_227.png");
@@ -631,7 +638,10 @@ TEST_P(Test_Model, Detection_normalized)
     testDetectModel(weights_file, config_file, img_path, refClassIds, refConfidences, refBoxes,
                     scoreDiff, iouDiff, confThreshold, nmsThreshold, size, mean, scale);
 }
+#endif
 
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(Test_Model, Segmentation)
 {
     applyTestTag(
@@ -673,8 +683,7 @@ TEST_P(Test_Model, Segmentation)
     }
 
     std::string inp = _tf("dog416.png");
-    std::string weights_file = _tf("fcn8s-heavy-pascal.prototxt");
-    std::string config_file = _tf("fcn8s-heavy-pascal.caffemodel", false);
+    std::string weights_file = _tf("onnx/models/fcn-resnet50-12.onnx");
     std::string exp = _tf("segmentation_exp.png");
 
     Size size{128, 128};
@@ -682,8 +691,9 @@ TEST_P(Test_Model, Segmentation)
     Scalar mean = Scalar();
     bool swapRB = false;
 
-    testSegmentationModel(weights_file, config_file, inp, exp, norm, size, mean, scale, swapRB);
+    testSegmentationModel(weights_file, "", inp, exp, norm, size, mean, scale, swapRB);
 }
+#endif
 
 TEST_P(Test_Model, TextRecognition)
 {

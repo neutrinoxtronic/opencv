@@ -7,7 +7,9 @@ Barcode Recognition    {#tutorial_barcode_detect_and_decode}
 
 |    |    |
 | -: | :- |
-| Compatibility | OpenCV >= 4.8 |
+| Compatibility | 4.8 <= OpenCV < 5.0 |
+> OpenCV >= 5.0 remove Caffe importer https://github.com/opencv/opencv/issues/25314. This tutorial is not compatible with OpenCV 5.0 and later.
+
 
 Goal
 ----

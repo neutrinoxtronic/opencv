@@ -104,8 +104,7 @@ TEST_P(DNNTestNetwork, DISABLED_YOLOv8n) {
 TEST_P(DNNTestNetwork, AlexNet)
 {
     applyTestTag(CV_TEST_TAG_MEMORY_1GB);
-    processNet("dnn/bvlc_alexnet.caffemodel", "dnn/bvlc_alexnet.prototxt",
-               Size(227, 227), "prob");
+    processNet("dnn/onnx/models/alexnet.onnx", "", Size(224, 224), "prob_1");
     expectNoFallbacksFromIE(net);
     expectNoFallbacksFromCUDA(net);
 }
@@ -117,16 +116,14 @@ TEST_P(DNNTestNetwork, ResNet_50)
         CV_TEST_TAG_DEBUG_VERYLONG
     );
 
-    processNet("dnn/ResNet-50-model.caffemodel", "dnn/ResNet-50-deploy.prototxt",
-               Size(224, 224), "prob");
+    processNet("dnn/onnx/models/resnet50v1.onnx", "", Size(224, 224), "resnetv17_dense0_fwd", 0.005, 0.03);
     expectNoFallbacksFromIE(net);
     expectNoFallbacksFromCUDA(net);
 }
 
 TEST_P(DNNTestNetwork, SqueezeNet_v1_1)
 {
-    processNet("dnn/squeezenet_v1.1.caffemodel", "dnn/squeezenet_v1.1.prototxt",
-               Size(227, 227), "prob");
+    processNet("dnn/onnx/models/squeezenet.onnx", "", Size(224, 224), "softmaxout_1");
     expectNoFallbacksFromIE(net);
     expectNoFallbacksFromCUDA(net);
 }
@@ -135,8 +132,7 @@ TEST_P(DNNTestNetwork, GoogLeNet)
 {
     applyTestTag(target == DNN_TARGET_CPU ? "" : CV_TEST_TAG_MEMORY_512MB);
 
-    processNet("dnn/bvlc_googlenet.caffemodel", "dnn/bvlc_googlenet.prototxt",
-               Size(224, 224), "prob");
+    processNet("dnn/onnx/models/googlenet.onnx", "", Size(224, 224), "prob_1");
     expectNoFallbacksFromIE(net);
     expectNoFallbacksFromCUDA(net);
 }
@@ -156,6 +152,8 @@ TEST_P(DNNTestNetwork, Inception_5h)
     expectNoFallbacksFromCUDA(net);
 }
 
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(DNNTestNetwork, MobileNet_SSD_Caffe)
 {
     applyTestTag(CV_TEST_TAG_MEMORY_512MB);
@@ -168,7 +166,10 @@ TEST_P(DNNTestNetwork, MobileNet_SSD_Caffe)
                inp, "detection_out", scoreDiff, iouDiff, detectionConfThresh);
     expectNoFallbacksFromIE(net);
 }
+#endif
 
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(DNNTestNetwork, MobileNet_SSD_Caffe_Different_Width_Height)
 {
 #if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_EQ(2022010000)
@@ -209,6 +210,7 @@ TEST_P(DNNTestNetwork, MobileNet_SSD_Caffe_Different_Width_Height)
                 inp, "detection_out", scoreDiff, iouDiff);
     expectNoFallbacksFromIE(net);
 }
+#endif
 
 TEST_P(DNNTestNetwork, MobileNet_SSD_v1_TensorFlow)
 {
@@ -285,7 +287,9 @@ TEST_P(DNNTestNetwork, MobileNet_SSD_v2_TensorFlow)
     expectNoFallbacksFromIE(net);
 }
 
-TEST_P(DNNTestNetwork, SSD_VGG16)
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
+TEST_P(DNNTestNetwork, SSD)
 {
     applyTestTag(
         CV_TEST_TAG_MEMORY_2GB,
@@ -317,7 +321,10 @@ TEST_P(DNNTestNetwork, SSD_VGG16)
                iouDiff, 0.2, false);
     expectNoFallbacksFromIE(net);
 }
+# endif
 
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(DNNTestNetwork, OpenPose_pose_coco)
 {
     applyTestTag(CV_TEST_TAG_LONG, (target == DNN_TARGET_CPU ? CV_TEST_TAG_MEMORY_1GB : CV_TEST_TAG_MEMORY_2GB),
@@ -335,7 +342,10 @@ TEST_P(DNNTestNetwork, OpenPose_pose_coco)
     expectNoFallbacksFromIE(net);
     expectNoFallbacksFromCUDA(net);
 }
+#endif
 
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(DNNTestNetwork, OpenPose_pose_mpi)
 {
     applyTestTag(CV_TEST_TAG_LONG, (target == DNN_TARGET_CPU ? CV_TEST_TAG_MEMORY_1GB : CV_TEST_TAG_MEMORY_2GB),
@@ -354,7 +364,10 @@ TEST_P(DNNTestNetwork, OpenPose_pose_mpi)
     expectNoFallbacksFromIE(net);
     expectNoFallbacksFromCUDA(net);
 }
+#endif
 
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 TEST_P(DNNTestNetwork, OpenPose_pose_mpi_faster_4_stages)
 {
     applyTestTag(CV_TEST_TAG_LONG, CV_TEST_TAG_MEMORY_1GB);
@@ -371,15 +384,7 @@ TEST_P(DNNTestNetwork, OpenPose_pose_mpi_faster_4_stages)
     expectNoFallbacksFromIE(net);
     expectNoFallbacksFromCUDA(net);
 }
-
-TEST_P(DNNTestNetwork, opencv_face_detector)
-{
-    Mat img = imread(findDataFile("gpu/lbpcascade/er.png"));
-    Mat inp = blobFromImage(img, 1.0, Size(), Scalar(104.0, 177.0, 123.0), false, false);
-    processNet("dnn/opencv_face_detector.caffemodel", "dnn/opencv_face_detector.prototxt",
-               inp, "detection_out");
-    expectNoFallbacksFromIE(net);
-}
+#endif
 
 TEST_P(DNNTestNetwork, Inception_v2_SSD_TensorFlow)
 {

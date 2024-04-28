@@ -3,6 +3,9 @@
 // of this distribution and at http://opencv.org/license.html
 // To download the onnx model, see: https://storage.googleapis.com/ailia-models/colorization/colorizer.onnx
 
+
+// Disabled due to the lack of the model support. https://github.com/opencv/opencv/issues/25314
+#if 0
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -115,3 +118,4 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+#endif
