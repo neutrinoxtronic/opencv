@@ -720,6 +720,7 @@ INSTANTIATE_TEST_CASE_P(/*nothing*/, Layer_Tile_Test,
         std::vector<int>({}),
         std::vector<int>({2}),
         std::vector<int>({2, 1}),
-        std::vector<int>({1, 2})
+        std::vector<int>({1, 2}),
+        std::vector<int>({2, 2})
         ));
 }}
