@@ -3095,7 +3095,7 @@ private:
 //! @addtogroup core_cluster
 //!  @{
 
-/** @example samples/cpp/kmeans.cpp
+/** @example samples/cpp/snippets/kmeans.cpp
 An example on K-means clustering
 */
 

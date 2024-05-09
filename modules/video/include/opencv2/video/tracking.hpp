@@ -78,7 +78,8 @@ See the OpenCV sample camshiftdemo.c that tracks colored objects.
  */
 CV_EXPORTS_W RotatedRect CamShift( InputArray probImage, CV_IN_OUT Rect& window,
                                    TermCriteria criteria );
-/** @example samples/cpp/camshiftdemo.cpp
+
+/** @example samples/cpp/snippets/camshiftdemo.cpp
 An example using the mean-shift tracking algorithm
 */
 
@@ -345,7 +346,7 @@ double findTransformECC(InputArray templateImage, InputArray inputImage,
     TermCriteria criteria = TermCriteria(TermCriteria::COUNT+TermCriteria::EPS, 50, 0.001),
     InputArray inputMask = noArray());
 
-/** @example samples/cpp/kalman.cpp
+/** @example samples/cpp/snippets/kalman.cpp
 An example using the standard Kalman filter
 */
 
