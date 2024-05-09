@@ -50,7 +50,7 @@ public:
                 outputs[0][i] *= repeats[i];
             }
         } else {
-            CV_CheckGE((int)repeats.size(), 1, "Provide at least one repeat along any dimention");
+            CV_CheckGE((int)repeats.size(), 1, "Tile: Provide at least one repeat along any dimension");
             outputs.assign(1, repeats);
             if (inputs[0].size() == 1)
                 outputs[0][repeats.size() - 1] *= inputs[0][0];
